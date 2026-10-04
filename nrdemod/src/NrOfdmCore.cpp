@@ -824,7 +824,6 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
     const size_t extra = static_cast<size_t>(cpLong - cpNormal);
     const size_t dMin = cfg.timingSearch ? (coarse > extra ? coarse - extra : 0) : 0;
     const size_t dMax = cfg.timingSearch ? std::min(coarse + extra, symLen - 1) : 0;
-    const int numHyp = period > 0 ? period : 1;
     int hypSyms = period > 0 ? 2 * period : 4;
     if (cfg.maxSymbols > 0 && cfg.maxSymbols < hypSyms) hypSyms = cfg.maxSymbols;
     struct Hypothesis { size_t d; int o; double metric; };
@@ -832,6 +831,10 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
     double best = -1.0;
     size_t bestIdx = 0;
     for (size_t d = dMin; d <= dMax; ++d) {
+      const size_t normalSymbols = (n - d) / static_cast<size_t>(cpNormal + N);
+      const int numHyp = period > 0
+          ? std::min(period, static_cast<int>(normalSymbols) + 1)
+          : 1;
       for (int o = 0; o < numHyp; ++o) {
         const std::vector<SymbolLayout> hyp =
             layoutSymbols(n, d, N, cpNormal, cpLong, period, o, hypSyms);
@@ -963,15 +966,13 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
 
   // symbols excluded from the statistics: DM-RS positions and user supplied indices
   std::vector<bool> excluded(numSym, false);
-  if (cfg.dmrs.exclude) {
-    const std::vector<int> positions = dmrsSymbolsInSlot(cfg.dmrs);
-    const int perSlot = symbolsPerSlot(cfg.extendedCp);
-    for (size_t j = 0; j < numSym; ++j) {
-      const int rel = ((static_cast<int>(j) - slotStart) % perSlot + perSlot) % perSlot;
-      if (std::find(positions.begin(), positions.end(), rel) != positions.end()) {
-        excluded[j] = true;
-        r.dmrsSymbols.push_back(static_cast<int>(j));
-      }
+  const std::vector<int> positions = dmrsSymbolsInSlot(cfg.dmrs);
+  const int dmrsPerSlot = symbolsPerSlot(cfg.extendedCp);
+  for (size_t j = 0; j < numSym; ++j) {
+    const int rel = ((static_cast<int>(j) - slotStart) % dmrsPerSlot + dmrsPerSlot) % dmrsPerSlot;
+    if (std::find(positions.begin(), positions.end(), rel) != positions.end()) {
+      r.dmrsSymbols.push_back(static_cast<int>(j));
+      if (cfg.dmrs.exclude) excluded[j] = true;
     }
   }
   for (size_t e = 0; e < cfg.excludedSymbols.size(); ++e) {
