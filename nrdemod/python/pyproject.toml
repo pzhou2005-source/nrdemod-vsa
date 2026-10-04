@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nrdemod"
+version = "1.0.0"
+description = "Native 5G NR CP-OFDM / DFT-s-OFDM demodulator with Keysight 89600 VSA correlation helpers"
+requires-python = ">=3.8"
+dependencies = ["numpy>=1.20"]
+
+[project.optional-dependencies]
+mat = ["scipy>=1.5"]
+plot = ["matplotlib>=3.3"]
+
+[tool.setuptools]
+packages = ["nrdemod"]
+
+[tool.setuptools.package-data]
+nrdemod = ["_lib/*.so", "_lib/*.dll", "_lib/*.dylib", "_lib/*.pyd"]

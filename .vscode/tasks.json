@@ -1,0 +1,72 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "1. Build everything (cmake + venv + selftest)",
+      "type": "shell",
+      "command": "${workspaceFolder}\\build.bat",
+      "windows": { "command": "${workspaceFolder}\\build.bat" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$msCompile"]
+    },
+    {
+      "label": "2. Probe the 89600 SCPI server",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["${workspaceFolder}/tools/vsa_link.py", "--probe", "--host", "${input:vsaHost}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "3. Correlate - live",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "${workspaceFolder}/tools/correlate.py",
+        "live",
+        "--host", "${input:vsaHost}",
+        "--config", "${workspaceFolder}/configs/${input:caseFile}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "4. Correlate - saved recording",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "${workspaceFolder}/tools/correlate.py",
+        "file", "${file}",
+        "--config", "${workspaceFolder}/configs/${input:caseFile}",
+        "--vsa-evm", "${input:vsaEvm}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "5. Self test (no instrument)",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["${workspaceFolder}/tools/correlate.py", "selftest"],
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "vsaHost",
+      "type": "promptString",
+      "description": "89600 VSA SCPI host",
+      "default": "127.0.0.1"
+    },
+    {
+      "id": "caseFile",
+      "type": "pickString",
+      "description": "Measurement case",
+      "options": ["fr1_100mhz_mu1_64qam.json", "fr2_200mhz_mu3_16qam.json"],
+      "default": "fr1_100mhz_mu1_64qam.json"
+    },
+    {
+      "id": "vsaEvm",
+      "type": "promptString",
+      "description": "EVM (%) shown by the 89600 for this capture",
+      "default": "1.0"
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "_comment": [
+    "SCPI mnemonics for the Keysight 89600 VSA SCPI server (default TCP 5025).",
+    "Mnemonics vary between VSA releases and measurement personalities, so the",
+    "lists below are candidates: vsa_link tries them in order and keeps the",
+    "first one the analyser accepts. Run 'python tools/vsa_link.py --probe' and",
+    "delete / fix whatever does not work on your installation.",
+    "Placeholders: {center} {span} {points} {path} (Python str.format)."
+  ],
+
+  "commands": {
+    "abort": ":INITiate:ABORt",
+    "single": [":INITiate:CONTinuous OFF"],
+    "continuous": [":INITiate:CONTinuous ON"],
+    "initiate": [":INITiate:IMMediate"],
+
+    "set_center": ":SENSe:FREQuency:CENTer {center}",
+    "set_span": ":SENSe:FREQuency:SPAN {span}",
+    "set_points": ":SENSe:SWEep:POINts {points}",
+    "set_binary_format": [
+      ":FORMat:TRACe:DATA REAL,32",
+      ":FORMat:BORDer SWAPped"
+    ],
+    "set_ascii_format": ":FORMat:TRACe:DATA ASCii",
+
+    "query_evm": [
+      ":TRACe1:DATA:TABLe? \"EVM\"",
+      ":CALCulate:MARKer1:Y?",
+      ":FETCh:EVM?"
+    ],
+    "query_freq_error": [
+      ":TRACe1:DATA:TABLe? \"FreqErr\"",
+      ":TRACe1:DATA:TABLe? \"CarrFreqErr\""
+    ],
+    "query_sample_rate": [
+      ":SENSe:FREQuency:SRATe?",
+      ":SENSe:WAVeform:SRATe?"
+    ],
+    "query_x_delta": [
+      ":TRACe1:X:SCALe:DELTa?",
+      ":TRACe1:DATA:XDELta?"
+    ],
+    "query_time_trace_binary": ":TRACe1:DATA?",
+    "query_time_trace_ascii": ":TRACe1:DATA?",
+    "query_points": ":SENSe:SWEep:POINts?",
+
+    "save_recording": ":MMEMory:STORe:RECording \"{path}\"",
+    "load_recording": ":MMEMory:LOAD:RECording \"{path}\""
+  }
+}

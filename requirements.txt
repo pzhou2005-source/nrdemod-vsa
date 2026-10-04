@@ -1,0 +1,4 @@
+numpy>=1.20
+scipy>=1.5
+matplotlib>=3.3
+comtypes>=1.2; sys_platform == "win32"

@@ -1,0 +1,35 @@
+{
+  "_comment": "Measurement case: FR1 100 MHz, SCS 30 kHz, 64QAM PUSCH, 122.88 MHz capture.",
+
+  "name": "fr1_100mhz_mu1_64qam",
+
+  "demod": {
+    "numerology": 1,
+    "frequencyRange": 1,
+    "channelBandwidthMHz": 100,
+    "numResourceBlocks": 0,
+    "resourceBlockOffset": 0,
+    "modulation": "64qam",
+    "sampleRate": 122880000.0,
+    "transformPrecoding": false,
+    "carrierOffsetHz": 0.0,
+    "burstSearch": true,
+    "timingSearch": true,
+    "cfoCorrection": true,
+    "equalize": true,
+    "phaseTracking": true,
+    "dmrsExclude": true
+  },
+
+  "vsa": {
+    "centerHz": 3500000000.0,
+    "spanHz": 122880000.0,
+    "points": 131072,
+    "recordingPath": "C:\\\\nrdemod-vsa\\\\captures\\\\last.mat"
+  },
+
+  "tolerance": {
+    "evmPercentPoints": 0.5,
+    "freqErrorHz": 50.0
+  }
+}

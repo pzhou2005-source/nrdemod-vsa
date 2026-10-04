@@ -1,0 +1,44 @@
+{
+  "name": "vsa_demo_dl_3g5_100mhz",
+  "comment": [
+    "The 89600's own 5G NR demo recording:",
+    "Help/Signals/5G NR/DL_at_3_5_GHz_100_MHz.{setx,sdf}",
+    "single CC, SS/PBCH + PDCCH + 3 PDSCH (QPSK/16QAM/256QAM), 30 kHz SCS, FR1 100 MHz.",
+    "Measured 2026-10-04: VSA 0.376 %rms / 0.01 Hz, nrdemod 9.79 %rms / 638 Hz.",
+    "The VSA demodulates each physical channel with full 3GPP knowledge; nrdemod sees",
+    "one blind allocation and settles on 256QAM for the whole grid, so the EVM is not",
+    "comparable. Symbols 0-3 (SSB/PDCCH) read 46-98 %, the rest a flat ~9 %.",
+    "Both numbers move with maxSymbols (which part of the frame is covered): 14/28/56/112",
+    "symbols give EVM 16.2/9.8/15.8/10.9 % and fErr 3683/638/-211/-899 Hz.",
+    "carrierOffsetHz: this carrier sits half a subcarrier above the tuned 3.5 GHz centre.",
+    "Without it nrdemod reports -14362 Hz. The PUSCH demo needs 0 - it is a property of",
+    "the carrier placement, not of NR, so it has to be configured per signal.",
+    "Tolerances are set to that observed spread - this case exercises the live COM path,",
+    "it is not an EVM parity check."
+  ],
+
+  "demod": {
+    "numerology": 1,
+    "frequencyRange": 1,
+    "channelBandwidthMHz": 100,
+    "modulation": "auto",
+    "sampleRate": 157286400.0,
+    "carrierOffsetHz": 15000.0,
+    "resample": true,
+    "maxSymbols": 28,
+    "equalize": true,
+    "dmrsExclude": true
+  },
+
+  "vsa": {
+    "centerHz": 3.5e9,
+    "spanHz": 122.88e6,
+    "points": 801,
+    "recordingPath": "C:\\Program Files\\Keysight\\89600 Software 2026_U2\\89600 VSA Software\\Help\\Signals\\5G NR\\DL_at_3_5_GHz_100_MHz.sdf"
+  },
+
+  "tolerance": {
+    "evmPercentPoints": 100.0,
+    "freqErrorHz": 5000.0
+  }
+}

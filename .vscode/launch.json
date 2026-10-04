@@ -1,0 +1,51 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "correlate: selftest",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/correlate.py",
+      "args": ["selftest"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}/nrdemod/python;${workspaceFolder}/tools" }
+    },
+    {
+      "name": "correlate: live (FR1 100 MHz)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/correlate.py",
+      "args": [
+        "live",
+        "--host", "127.0.0.1",
+        "--config", "${workspaceFolder}/configs/fr1_100mhz_mu1_64qam.json"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}/nrdemod/python;${workspaceFolder}/tools" }
+    },
+    {
+      "name": "correlate: current recording file",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/correlate.py",
+      "args": [
+        "file", "${file}",
+        "--config", "${workspaceFolder}/configs/fr1_100mhz_mu1_64qam.json"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}/nrdemod/python;${workspaceFolder}/tools" }
+    },
+    {
+      "name": "vsa_link: probe",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/vsa_link.py",
+      "args": ["--probe", "--host", "127.0.0.1"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

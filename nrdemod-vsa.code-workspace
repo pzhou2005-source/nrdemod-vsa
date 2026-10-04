@@ -1,0 +1,31 @@
+{
+  "folders": [
+    { "name": "bench", "path": "." },
+    { "name": "nrdemod-core", "path": "nrdemod" }
+  ],
+  "settings": {
+    "python.defaultInterpreterPath": "${workspaceFolder:bench}/.venv/Scripts/python.exe",
+    "python.analysis.extraPaths": [
+      "${workspaceFolder:bench}/nrdemod/python",
+      "${workspaceFolder:bench}/tools"
+    ],
+    "python.terminal.activateEnvironment": true,
+    "terminal.integrated.env.windows": {
+      "PYTHONPATH": "${workspaceFolder:bench}\\nrdemod\\python;${workspaceFolder:bench}\\tools"
+    },
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/*.egg-info": true,
+      "nrdemod/build": true
+    },
+    "cmake.sourceDirectory": "${workspaceFolder:nrdemod-core}",
+    "cmake.buildDirectory": "${workspaceFolder:nrdemod-core}/build"
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-python.python",
+      "ms-vscode.cpptools",
+      "ms-vscode.cmake-tools"
+    ]
+  }
+}

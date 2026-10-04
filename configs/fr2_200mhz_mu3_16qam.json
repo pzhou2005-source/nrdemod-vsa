@@ -1,0 +1,35 @@
+{
+  "_comment": "FR2 200 MHz, SCS 120 kHz, 16QAM, 245.76 MHz capture.",
+
+  "name": "fr2_200mhz_mu3_16qam",
+
+  "demod": {
+    "numerology": 3,
+    "frequencyRange": 2,
+    "channelBandwidthMHz": 200,
+    "numResourceBlocks": 0,
+    "resourceBlockOffset": 0,
+    "modulation": "16qam",
+    "sampleRate": 245760000.0,
+    "transformPrecoding": false,
+    "carrierOffsetHz": 0.0,
+    "burstSearch": true,
+    "timingSearch": true,
+    "cfoCorrection": true,
+    "equalize": true,
+    "phaseTracking": true,
+    "dmrsExclude": true
+  },
+
+  "vsa": {
+    "centerHz": 28000000000.0,
+    "spanHz": 245760000.0,
+    "points": 262144,
+    "recordingPath": "C:\\\\nrdemod-vsa\\\\captures\\\\last.mat"
+  },
+
+  "tolerance": {
+    "evmPercentPoints": 0.8,
+    "freqErrorHz": 500.0
+  }
+}

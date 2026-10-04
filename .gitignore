@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+reports/*
+!reports/.keep
+captures/*
+!captures/.keep
+
+# build output
+nrdemod/build/
+nrdemod/python/nrdemod/_lib/
+*.dll
+*.so
+*.dylib
+*.exe
+*.obj
+*.pdb
+*.egg-info/
+
+# saved instrument state and local scratch scripts
+*.setx
+tools/_*.py
