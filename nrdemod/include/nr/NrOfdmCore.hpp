@@ -44,7 +44,7 @@ struct DmrsConfig {
 };
 
 struct Config {
-  int    numerology;        // mu = 0..3 (SCS = 15 kHz * 2^mu)
+  int numerology;           // mu = 0..4 (SCS = 15 kHz * 2^mu)
   int    fftSize;           // 0 = derive from sample rate / bandwidth
   int    frequencyRange;    // FrequencyRange, selects the carrier RB table
   int    channelBandwidthMHz; // 0 = unknown (RB grid centred, 90 % fill)
@@ -89,6 +89,7 @@ struct Result {
   int    numSymbols;
   int    timingOffset;       // samples (input rate) from capture start to first CP start
   int    slotStartSymbol;    // index of the first symbol assumed to start a slot
+  double acquisitionFrequencyErrorHz;
   double frequencyErrorHz;
   int    detectedModulation; // Modulation enum (never MOD_AUTO)
   double rmsEvmPercent;

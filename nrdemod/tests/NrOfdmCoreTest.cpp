@@ -119,8 +119,15 @@ void testCarrierTable()
   CHECK(carrierResourceBlocks(FR1, 100, 2) == 135);
   CHECK(carrierResourceBlocks(FR1, 100, 1) == 273);
   CHECK(carrierResourceBlocks(FR1, 20, 0) == 106);
+  CHECK(carrierResourceBlocks(FR1, 3, 0) == 15);
+  CHECK(carrierResourceBlocks(FR1, 3, 1) == 0);
+  CHECK(carrierResourceBlocks(FR1, 3, 2) == 0);
   CHECK(carrierResourceBlocks(FR2, 100, 3) == 66);
   CHECK(carrierResourceBlocks(FR2, 200, 3) == 132);
+  CHECK(carrierResourceBlocks(FR2, 50, 4) == 16);
+  CHECK(carrierResourceBlocks(FR2, 100, 4) == 32);
+  CHECK(carrierResourceBlocks(FR2, 200, 4) == 66);
+  CHECK(carrierResourceBlocks(FR2, 400, 4) == 132);
   CHECK(carrierResourceBlocks(FR1, 100, 0) == 0);
   CHECK(carrierResourceBlocks(FR1, 37, 1) == 0);
 
@@ -146,6 +153,190 @@ void testHardDecision()
   CHECK_NEAR(h.imag(), 1.0 / std::sqrt(10.0), 1e-12);
   const std::complex<double> big = hardDecision(std::complex<double>(9.0, -9.0), MOD_QAM64);
   CHECK_NEAR(big.real(), 7.0 / std::sqrt(42.0), 1e-12);
+}
+
+void testCpPhaseAcquisition()
+{
+  for (const int blocks : {1, 51}) {
+    Config cfg;
+    cfg.numerology = 0;
+    cfg.fftSize = 2048;
+    cfg.sampleRate = cfg.fftSize * 15e3;
+    cfg.numResourceBlocks = blocks;
+    cfg.modulation = blocks == 1 ? MOD_QAM16 : MOD_QAM256;
+    cfg.timingSearch = false;
+    cfg.burstSearch = false;
+    const int symbols = blocks == 1 ? 56 : 7;
+    std::vector<std::complex<double>> reference;
+    std::vector<std::complex<float>> capture = generateTestSignal(cfg, symbols, 0, 4242u, &reference);
+    size_t start = 0;
+    for (int symbol = 0; symbol < symbols; ++symbol) {
+      const int prefix = symbol % 7 == 0 ? longCpLength(cfg.fftSize, cfg.numerology) : normalCpLength(cfg.fftSize);
+      const std::complex<float> phase = std::polar(1.0f, 0.6f);
+      for (int sample = 0; sample < cfg.fftSize + prefix; ++sample)
+        capture[start + sample] *= phase;
+      start += cfg.fftSize + prefix;
+    }
+    const Result result = demodulate(capture.data(), capture.size(), cfg);
+    CHECK(result.ok && result.numSymbols == symbols);
+    CHECK(result.rmsEvmPercent < 0.05);
+    size_t referenceOffset = 0;
+    const int carriers = 12 * blocks;
+    for (int symbol = 0; symbol < result.numSymbols; ++symbol) {
+      if (symbol % 14 == 2)
+        continue;
+      std::complex<double> cross(0.0, 0.0);
+      double measuredPower = 0.0, referencePower = 0.0;
+      for (int carrier = 0; carrier < carriers; ++carrier) {
+        const auto measured = result.constellation[symbol * carriers + carrier];
+        const auto expected = reference[referenceOffset++];
+        cross += measured * std::conj(expected);
+        measuredPower += std::norm(measured);
+        referencePower += std::norm(expected);
+      }
+      CHECK(std::abs(cross) / std::sqrt(measuredPower * referencePower) > 0.999);
+    }
+  }
+}
+
+void testMixedSsbData()
+{
+  for (const int blocks : {32, 51}) {
+    Config cfg;
+    cfg.numerology = blocks == 32 ? 3 : 1;
+    cfg.fftSize = blocks == 32 ? 512 : 1024;
+    cfg.sampleRate = cfg.fftSize * 15e3 * (1 << cfg.numerology);
+    cfg.numResourceBlocks = blocks;
+    cfg.modulation = MOD_QAM256;
+    cfg.timingSearch = false;
+    cfg.burstSearch = false;
+    cfg.dcPunctured = true;
+    const int carriers = 12 * blocks;
+    const int ssbStart = carriers / 2 - 120;
+    std::vector<std::complex<double>> reference;
+    std::vector<std::complex<float>> capture = generateTestSignal(cfg, 14, 0, 4242u, &reference);
+    std::vector<int> sequence(134, 0);
+    const int initial[] = {0, 1, 1, 0, 1, 1, 1};
+    std::copy(initial, initial + 7, sequence.begin());
+    for (int point = 0; point < 127; ++point)
+      sequence[point + 7] = (sequence[point + 4] + sequence[point]) % 2;
+    size_t start = 0;
+    for (int symbol = 0; symbol < 14; ++symbol) {
+      const int prefix = symbol == 0 ? longCpLength(cfg.fftSize, cfg.numerology) : normalCpLength(cfg.fftSize);
+      std::vector<std::complex<double>> spectrum(capture.begin() + start + prefix,
+          capture.begin() + start + prefix + cfg.fftSize);
+      fft(spectrum, false);
+      if (symbol >= 4 && symbol < 12) {
+        for (int point = 0; point < 240; ++point) {
+          const int carrier = ssbStart + point;
+          const int bin = (carrier - carriers / 2 + cfg.fftSize) % cfg.fftSize;
+          std::complex<double> value(0.0, 0.0);
+          if (symbol % 4 == 0) {
+            if (point >= 56 && point <= 182)
+              value = static_cast<double>(1 - 2 * sequence[(point - 56 + 43) % 127]);
+          } else {
+            value = std::polar(1.0, 3.14159265358979323846 / 4.0 + (point % 4) * 3.14159265358979323846 / 2.0);
+          }
+          spectrum[bin] = carrier == carriers / 2 ? std::complex<double>(0.0, 0.0) : value * std::sqrt(cfg.fftSize);
+        }
+      }
+      fft(spectrum, true);
+      for (int sample = 0; sample < cfg.fftSize + prefix; ++sample) {
+        const int offset = sample < prefix ? cfg.fftSize - prefix + sample : sample - prefix;
+        const auto value = spectrum[offset] / static_cast<double>(cfg.fftSize);
+        capture[start + sample] = std::complex<float>(value.real(), value.imag());
+      }
+      start += cfg.fftSize + prefix;
+    }
+    const Result result = demodulate(capture.data(), capture.size(), cfg);
+    CHECK(result.ok && result.numSymbols == 14);
+    CHECK(result.rmsEvmPercent < 0.05);
+    size_t referenceOffset = 0;
+    for (int symbol = 0; symbol < result.numSymbols; ++symbol) {
+      if (symbol == 2)
+        continue;
+      std::complex<double> cross(0.0, 0.0);
+      double measuredPower = 0.0, referencePower = 0.0;
+      for (int carrier = 0; carrier < carriers; ++carrier) {
+        const auto expected = reference[referenceOffset++];
+        if (carrier == carriers / 2 || (symbol >= 4 && symbol < 12 && carrier >= ssbStart && carrier < ssbStart + 240))
+          continue;
+        const auto measured = result.constellation[symbol * carriers + carrier];
+        cross += measured * std::conj(expected);
+        measuredPower += std::norm(measured);
+        referencePower += std::norm(expected);
+      }
+      CHECK(std::abs(cross) / std::sqrt(measuredPower * referencePower) > 0.999);
+    }
+  }
+}
+
+void testDftsDcAndFractionalTiming()
+{
+  const Modulation modulations[] = {MOD_QAM16, MOD_QAM64, MOD_QAM256};
+  for (const int numerology : {1, 4}) {
+    for (const Modulation modulation : modulations) {
+      Config cfg;
+      cfg.numerology = numerology;
+      cfg.fftSize = numerology == 4 ? 256 : 1024;
+      cfg.sampleRate = cfg.fftSize * 15000.0 * (1 << numerology);
+      cfg.numResourceBlocks = numerology == 4 ? 16 : 25;
+      cfg.modulation = modulation;
+      cfg.transformPrecoding = true;
+      cfg.dcPunctured = true;
+      cfg.removeIqOffset = true;
+      cfg.timingSearch = false;
+      const int carriers = 12 * cfg.numResourceBlocks;
+      for (const double delay : {-0.37, 0.37}) {
+        std::vector<std::complex<double>> reference;
+        std::vector<std::complex<float>> capture = generateTestSignal(cfg, 14, 0, 4242u, &reference);
+        size_t start = 0;
+        for (int symbol = 0; symbol < 14; ++symbol) {
+          const int prefix = symbol == 0 ? longCpLength(cfg.fftSize, cfg.numerology) : normalCpLength(cfg.fftSize);
+          std::vector<std::complex<double>> spectrum(capture.begin() + start + prefix,
+              capture.begin() + start + prefix + cfg.fftSize);
+          fft(spectrum, false);
+          for (int bin = 0; bin < cfg.fftSize; ++bin) {
+            const int frequency = bin < cfg.fftSize / 2 ? bin : bin - cfg.fftSize;
+            spectrum[bin] *= std::polar(1.0, 2.0 * 3.14159265358979323846 * delay * frequency / carriers);
+          }
+          if (modulation == MOD_QAM16 || numerology == 4)
+            spectrum[0] = std::complex<double>(0.0, 0.0);
+          fft(spectrum, true);
+          for (int sample = 0; sample < cfg.fftSize + prefix; ++sample) {
+            const int index = (sample + cfg.fftSize - prefix) % cfg.fftSize;
+            capture[start + sample] =
+                static_cast<std::complex<float>>(spectrum[index] / static_cast<double>(cfg.fftSize));
+          }
+          start += cfg.fftSize + prefix;
+        }
+        const Result result = demodulate(capture.data(), capture.size(), cfg);
+        std::printf("  dfts-dc-timing mod=%d delay=%.2f EVM=%.6f %%\n", modulation, delay, result.rmsEvmPercent);
+        CHECK(result.ok);
+        CHECK(result.numSymbols == 14);
+        CHECK(result.rmsEvmPercent < 0.05);
+        CHECK(result.constellation.size() == static_cast<size_t>(14 * carriers));
+        if (!result.ok || result.constellation.size() != static_cast<size_t>(14 * carriers))
+          continue;
+        size_t referenceStart = 0;
+        for (int symbol = 0; symbol < 14; ++symbol) {
+          if (symbol == cfg.dmrs.typeAPosition)
+            continue;
+          std::complex<double> cross(0.0, 0.0);
+          double measuredPower = 0.0, referencePower = 0.0;
+          for (int carrier = 0; carrier < carriers; ++carrier) {
+            const std::complex<double> measured = result.constellation[symbol * carriers + carrier];
+            const std::complex<double> expected = reference[referenceStart + carrier];
+            cross += measured * std::conj(expected);
+            measuredPower += std::norm(measured);
+            referencePower += std::norm(expected);
+          }
+          CHECK(std::abs(cross) / std::sqrt(measuredPower * referencePower) > 0.999);
+          referenceStart += carriers;
+        }
+      }
+    }
+  }
 }
 
 struct Impairment {
@@ -227,6 +418,46 @@ void applyImpairment(std::vector<std::complex<float> >& x, const Config& cfg, co
 Result runScenario(const char* title, Config cfg, int numSymbols, int leading,
     double noiseRms, double cfoFraction, bool autoDetect, double evmLimit, int expectedTiming,
     const Impairment& imp = Impairment());
+
+void testCompleteBurstSelection()
+{
+  Config cfg;
+  cfg.numerology = 1;
+  cfg.fftSize = 512;
+  cfg.sampleRate = 15360000.0;
+  cfg.modulation = MOD_QAM256;
+  cfg.numResourceBlocks = 20;
+  cfg.maxSymbols = 14;
+  std::vector<std::complex<double>> reference;
+  const std::vector<std::complex<float>> waveform = generateTestSignal(cfg, 14, 0, 4321, &reference);
+  std::vector<std::complex<float>> capture(waveform.end() - 1000, waveform.end());
+  capture.resize(3048, std::complex<float>(0.0f, 0.0f));
+  capture.insert(capture.end(), waveform.begin(), waveform.end());
+  capture.resize(capture.size() + 2048, std::complex<float>(0.0f, 0.0f));
+  const Result result = demodulate(capture.data(), capture.size(), cfg);
+  CHECK(result.ok);
+  CHECK(std::abs(result.timingOffset - 3048) <= 2);
+  CHECK(result.numSymbols == 14);
+  CHECK(result.rmsEvmPercent < 0.05);
+  const size_t subcarriers = 12 * cfg.numResourceBlocks;
+  CHECK(result.constellation.size() == 14 * subcarriers);
+  CHECK(reference.size() == (14 - result.dmrsSymbols.size()) * subcarriers);
+  size_t referencePoint = 0;
+  for (int symbol = 0; symbol < result.numSymbols; ++symbol) {
+    if (std::find(result.dmrsSymbols.begin(), result.dmrsSymbols.end(), symbol) != result.dmrsSymbols.end())
+      continue;
+    std::complex<double> cross(0.0, 0.0);
+    double measuredPower = 0.0, referencePower = 0.0;
+    for (size_t carrier = 0; carrier < subcarriers; ++carrier) {
+      const std::complex<double> measured = result.constellation[symbol * subcarriers + carrier];
+      cross += measured * std::conj(reference[referencePoint]);
+      measuredPower += std::norm(measured);
+      referencePower += std::norm(reference[referencePoint]);
+      ++referencePoint;
+    }
+    CHECK(std::abs(cross) / std::sqrt(measuredPower * referencePower) > 0.999);
+  }
+}
 
 void runLoopback(int mu, int fftSize, Modulation mod, int numSymbols, int leading,
     double noiseRms, double cfoFraction, bool autoDetect, double evmLimit)
@@ -330,6 +561,12 @@ int main()
   testResamplerTone();
   testCarrierTable();
   testHardDecision();
+  testCpPhaseAcquisition();
+  testMixedSsbData();
+  testCompleteBurstSelection();
+  testDftsDcAndFractionalTiming();
+
+  runLoopback(4, 512, MOD_QAM256, 14, 0, 0.0, 0.0, false, 0.1);
 
   std::printf("ideal loopback\n");
   runLoopback(0, 1024, MOD_QPSK,   14, 0,   0.0,  0.0,  false, 0.1);
@@ -479,6 +716,17 @@ int main()
     CHECK(cont.burstStart == 0);
     CHECK(cont.burstLength >= 14 * 2192);
     CHECK(cont.firstSlotIndex == 0);
+
+    // A capture ending inside the final symbol has no detectable burst end.
+    std::vector<std::complex<float> > truncated = generateTestSignal(cfg, 14, idle.idleBefore, 12348u, NULL);
+    CHECK(truncated.size() > static_cast<size_t>(cfg.fftSize));
+    truncated.resize(truncated.size() - static_cast<size_t>(cfg.fftSize / 2));
+    const Result incomplete = demodulate(truncated.data(), truncated.size(), cfg);
+    CHECK(incomplete.ok);
+    CHECK(incomplete.numSymbols == 13);
+    CHECK(incomplete.rmsEvmPercent == 999.0);
+    CHECK(incomplete.peakEvmPercent == 999.0);
+    CHECK(incomplete.evmPerSymbol.size() == static_cast<size_t>(incomplete.numSymbols));
   }
 
   std::printf("I/Q impairments, DC offset, common phase error statistics\n");
