@@ -37,27 +37,27 @@
   X(numSlots)                    \
   X(firstSlotIndex)
 
-#define NRD_DOUBLE_FIELDS(X)     \
-  X(resampleRate)                \
-  X(acquisitionFrequencyErrorHz) \
-  X(frequencyErrorHz)            \
-  X(rmsEvmPercent)               \
-  X(peakEvmPercent)              \
-  X(rmsEvmDb)                    \
-  X(syncCorrelation)             \
-  X(normalizationFactor)         \
-  X(dataPowerDb)                 \
-  X(burstPowerDb)                \
-  X(iqOffsetDb)                  \
-  X(iqGainImbalanceDb)           \
-  X(iqQuadratureErrorDeg)        \
-  X(iqTimingSkewSec)             \
-  X(commonPhaseErrorDeg)         \
-  X(dmrsEvmPercent)              \
-  X(dmrsPowerDb)                 \
-  X(flatnessRippleRange1Db)      \
-  X(flatnessRippleRange2Db)      \
-  X(flatnessMaxRange1MinRange2Db)\
+#define NRD_DOUBLE_FIELDS(X)                                                                                           \
+  X(resampleRate)                                                                                                      \
+  X(acquisitionFrequencyErrorHz)                                                                                       \
+  X(frequencyErrorHz)                                                                                                  \
+  X(rmsEvmPercent)                                                                                                     \
+  X(peakEvmPercent)                                                                                                    \
+  X(rmsEvmDb)                                                                                                          \
+  X(syncCorrelation)                                                                                                   \
+  X(normalizationFactor)                                                                                               \
+  X(dataPowerDb)                                                                                                       \
+  X(burstPowerDb)                                                                                                      \
+  X(iqOffsetDb)                                                                                                        \
+  X(iqGainImbalanceDb)                                                                                                 \
+  X(iqQuadratureErrorDeg)                                                                                              \
+  X(iqTimingSkewSec)                                                                                                   \
+  X(commonPhaseErrorDeg)                                                                                               \
+  X(dmrsEvmPercent)                                                                                                    \
+  X(dmrsPowerDb)                                                                                                       \
+  X(flatnessRippleRange1Db)                                                                                            \
+  X(flatnessRippleRange2Db)                                                                                            \
+  X(flatnessMaxRange1MinRange2Db)                                                                                      \
   X(flatnessMaxRange2MinRange1Db)
 
 #define NRD_VECTOR_FIELDS(X)     \
