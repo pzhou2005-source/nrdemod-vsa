@@ -10,13 +10,23 @@ nrdemod-vsa/
   tools/vsa_link.py         SCPI client for the 89600 SCPI server
   tools/correlate.py        live / file / selftest correlation runner
   tools/report.py           CSV trend log + JSON + HTML report with plots
+  tools/replay_exported_waveforms.py  batch-replay captures/exported .npy/.json (5GNR, native core)
   configs/scpi_89600.json   editable SCPI command map
   configs/*.json            measurement cases (FR1 100 MHz, FR2 200 MHz, ...)
   captures/                 VSA recordings
+  captures/exported/        5GNR TDC captures exported as .npy+.json (native nrdemod replay)
+  captures/tdc_reference/   WiFi/UWB/Bluetooth/NB-IoT TDC captures as raw .wfm+.para2 (legacy-only
+                            standards: no native nrdemod backend, so play the .wfm directly into
+                            the 89600 and compare against the recorded RESULTs in the .para2)
   reports/                  generated reports
   build.bat                 cmake + venv + dependencies + self test
   nrdemod-vsa.code-workspace
 ```
+
+Produced by `pack_for_windows.sh [output.zip] [--waveforms <export-dir>] [--tdc-reference <TDC-root>]`
+in the main repo: `--waveforms` bundles the 5GNR native-replay export (`captures/exported/`),
+`--tdc-reference` bundles the raw WiFi/UWB/Bluetooth/NB-IoT TDC pairs (`captures/tdc_reference/`).
+
 
 ## Install on the Windows station
 
