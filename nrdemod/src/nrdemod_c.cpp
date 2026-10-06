@@ -39,6 +39,7 @@
 
 #define NRD_DOUBLE_FIELDS(X)     \
   X(resampleRate)                \
+  X(acquisitionFrequencyErrorHz) \
   X(frequencyErrorHz)            \
   X(rmsEvmPercent)               \
   X(peakEvmPercent)              \

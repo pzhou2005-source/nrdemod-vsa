@@ -78,11 +78,14 @@ def _search_paths() -> list:
 
 def _load():
     tried = []
+    # Windows' secure DLL search (Python 3.8+) ignores PATH; winmode=0 restores
+    # the legacy search so the mingw runtime DLLs (libstdc++-6.dll etc.) resolve.
+    kwargs = {"winmode": 0} if sys.platform == "win32" else {}
     for path in _search_paths():
         if os.path.sep in path and not os.path.isfile(path):
             continue
         try:
-            return ctypes.CDLL(path)
+            return ctypes.CDLL(path, **kwargs)
         except OSError as exc:  # pragma: no cover - platform dependent
             tried.append(f"{path}: {exc}")
     raise OSError(

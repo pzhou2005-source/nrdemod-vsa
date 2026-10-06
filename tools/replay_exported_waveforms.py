@@ -57,8 +57,11 @@ def replay(dataset_dir: str, csv_path: str) -> int:
 
             linux_evm = meta.get("linuxRmsEvmPercent")
             delta = (res.rmsEvmPercent - linux_evm) if (res.ok and linux_evm is not None) else ""
+            # linuxFrequencyErrorHz is the pre-refinement estimate; compare against the matching
+            # nrdemod stage instead of the final (phase-tracking refined) frequencyErrorHz.
+            freq_err = res.acquisitionFrequencyErrorHz if res.ok else ""
             writer.writerow([name, res.ok, res.rmsEvmPercent if res.ok else "", linux_evm, delta,
-                              res.frequencyErrorHz if res.ok else "", meta.get("linuxFrequencyErrorHz"),
+                              freq_err, meta.get("linuxFrequencyErrorHz"),
                               res.modulation_name if res.ok else "", res.numSymbols if res.ok else "",
                               res.error])
             if res.ok:

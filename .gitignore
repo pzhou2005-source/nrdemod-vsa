@@ -6,6 +6,7 @@ captures/*
 !captures/.keep
 
 # build output
+build/
 nrdemod/build/
 nrdemod/python/nrdemod/_lib/
 *.dll
@@ -19,3 +20,6 @@ nrdemod/python/nrdemod/_lib/
 # saved instrument state and local scratch scripts
 *.setx
 tools/_*.py
+
+# local IDE state
+.vscode/settings.json
