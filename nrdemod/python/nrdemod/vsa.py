@@ -37,13 +37,13 @@ def _parse_text(path: str) -> Tuple[np.ndarray, Optional[float]]:
             if not line:
                 continue
             if not _NUMERIC.match(line):
-                m = re.search(r"(XDelta|SampleInterval)\s*[,;:=]\s*([0-9.eE+\-]+)", line, re.I)
+                m = re.search(r"(XDelta|SampleInterval)\s*[,;:=\t ]\s*([0-9.eE+\-]+)", line, re.I)
                 if m:
                     delta = float(m.group(2))
                     if delta > 0:
                         sample_rate = 1.0 / delta
                     continue
-                m = re.search(r"(SampleRate|Fs)\s*[,;:=]\s*([0-9.eE+\-]+)", line, re.I)
+                m = re.search(r"(SampleRate|Fs)\s*[,;:=\t ]\s*([0-9.eE+\-]+)", line, re.I)
                 if m:
                     sample_rate = float(m.group(2))
                 continue

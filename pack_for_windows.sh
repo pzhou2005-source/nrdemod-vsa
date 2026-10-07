@@ -2,7 +2,7 @@
 # Builds a self-contained nrdemod-vsa bundle for the Windows analysis station.
 #
 #   ./pack_for_windows.sh [output.zip] [--waveforms <exported-dataset-dir>] \
-#       [--tdc-reference <TDC-waveform-root>]
+#       [--tdc-reference <TDC-waveform-root>] [--tdc-reference-plaintext <converted-dir>]
 #
 # The archive contains the bench tooling plus a full copy of the nrdemod core,
 # so the Windows side only needs CMake, MSVC and Python. Pass --waveforms with
@@ -19,6 +19,13 @@
 # the .wfm plays back directly in the 89600 (Inputs.Recording.RecallFile detects
 # the Signal Studio format) against its own WiFi/BT/UWB/IoT personality, and the
 # paired .para2 documents the recorded reference metrics to compare against.
+#
+# Pass --tdc-reference-plaintext with the output directory of the in-tree
+# testDemod_ConvertTdcWaveformsToUnencryptedVsa89600 test (NR_DEMOD_REFERENCE_
+# WAVEFORM_CONVERT_OUTPUT) to bundle unencrypted VSA_89600-format .txt copies
+# under captures/tdc_reference_plaintext/<family>/ instead of/alongside the raw
+# encrypted .wfm. Use this when the Windows/Linux side has no Signal Studio
+# decrypt license: tools/vsa.py's load_iq() reads this plaintext format directly.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,11 +33,13 @@ core="$here/../nrdemod_standalone"
 out="$here/../nrdemod-vsa.zip"
 waveforms=""
 tdcReference=""
+tdcReferencePlaintext=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --waveforms) waveforms="$2"; shift 2 ;;
     --tdc-reference) tdcReference="$2"; shift 2 ;;
+    --tdc-reference-plaintext) tdcReferencePlaintext="$2"; shift 2 ;;
     *) out="$1"; shift ;;
   esac
 done
@@ -45,6 +54,10 @@ if [[ -n "$waveforms" && ! -d "$waveforms" ]]; then
 fi
 if [[ -n "$tdcReference" && ! -d "$tdcReference" ]]; then
   echo "error: --tdc-reference directory not found: $tdcReference" >&2
+  exit 1
+fi
+if [[ -n "$tdcReferencePlaintext" && ! -d "$tdcReferencePlaintext" ]]; then
+  echo "error: --tdc-reference-plaintext directory not found: $tdcReferencePlaintext" >&2
   exit 1
 fi
 
@@ -94,6 +107,12 @@ if [[ -n "$tdcReference" ]]; then
   echo "tdc reference: $tdcCount paired WiFi/UWB/Bluetooth/NbIot waveforms bundled under captures/tdc_reference"
 fi
 
+if [[ -n "$tdcReferencePlaintext" ]]; then
+  mkdir -p "$root/captures/tdc_reference_plaintext"
+  rsync -a "$tdcReferencePlaintext/" "$root/captures/tdc_reference_plaintext/"
+  echo "tdc reference plaintext: $(find "$root/captures/tdc_reference_plaintext" -name '*.txt' | wc -l) unencrypted VSA_89600 captures bundled"
+fi
+
 unix2dos_safe() { sed -i 's/\r\?$/\r/' "$1"; }
 unix2dos_safe "$root/build.bat"
 
@@ -111,4 +130,8 @@ if [[ -n "$tdcReference" ]]; then
   echo "  5. load a .wfm under captures\\tdc_reference\\<family> into the 89600 (Inputs > Recording"
   echo "     > Recall) with the matching WiFi/BT/UWB/IoT personality and compare against the"
   echo "     RESULT lines in the paired .para2 (no nrdemod replay: these standards are legacy-only)"
+fi
+if [[ -n "$tdcReferencePlaintext" ]]; then
+  echo "  6. no Signal Studio license needed: tools\\vsa.py's load_iq() reads captures\\"
+  echo "     tdc_reference_plaintext\\<family>\\*.txt directly (unencrypted VSA_89600 format)"
 fi
