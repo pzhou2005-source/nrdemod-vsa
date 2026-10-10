@@ -39,6 +39,13 @@ struct DmrsConfig {
   int  typeAPosition;       // l0 for mapping type A: 2 or 3
   int  additionalPositions; // 0..3
   bool doubleSymbol;        // two consecutive DM-RS symbols
+  bool configurationType2;  // RE mapping: false = type 1 (comb of 6), true = type 2 (pairs of 2)
+  // TS 38.211 6.4.1.1.1.1 Gold sequence identity: scramblingId < 0 means "unknown", so the
+  // true DM-RS sequence cannot be regenerated and the receiver falls back to the blind
+  // (decision free) statistical estimate used for dmrsEvmPercent/dmrsPowerDb.
+  int scramblingId;    // N_ID^nSCID, 0..65535 (defaults to the cell id when not overridden)
+  int nSCID;           // 0 or 1, selects which of the two scrambling ids above applies
+  int startSlotNumber; // slot number (n_s,f^mu) of the capture's first symbol, for cinit
 
   DmrsConfig();
 };
@@ -71,6 +78,10 @@ struct Config {
   double symbolTimingAdjustmentPercent; // FFT window shift in % of the CP (negative = earlier)
   bool   resample;          // allow resampling when Fs != fftSize * SCS
   double sampleRate;        // Hz
+  // PSS/SSB correlation search used for the blind EVM-exclusion resourceMask (TS 38.211 7.4.3).
+  // Only ever present on the downlink; disabling it for uplink captures skips an O(numSymbols *
+  // numSubcarriers * 127) correlation that would otherwise never find a match.
+  bool ssbSearch;
   DmrsConfig dmrs;
   std::vector<int> excludedSymbols; // additional symbol indices (0 based) excluded from EVM
 

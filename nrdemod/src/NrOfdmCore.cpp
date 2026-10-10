@@ -210,6 +210,62 @@ bool resolveGrid(const Config& cfg, Grid& g, std::string& error)
   return true;
 }
 
+// TS 38.211 5.2.1 Gold sequence: c(n) = (x1(n+Nc) + x2(n+Nc)) mod 2, Nc = 1600.
+void goldSequence(unsigned cinit, size_t length, std::vector<int>& c)
+{
+  const size_t Nc = 1600;
+  const size_t total = Nc + length;
+  std::vector<int> x1(total, 0), x2(total, 0);
+  x1[0] = 1;
+  for (size_t n = 0; n < 31 && n < total; ++n) {
+    x2[n] = static_cast<int>((cinit >> n) & 1u);
+  }
+  for (size_t n = 0; n + 31 < total; ++n) {
+    x1[n + 31] = (x1[n + 3] ^ x1[n]) & 1;
+    x2[n + 31] = (x2[n + 3] ^ x2[n + 2] ^ x2[n + 1] ^ x2[n]) & 1;
+  }
+  c.resize(length);
+  for (size_t n = 0; n < length; ++n) {
+    c[n] = x1[n + Nc] ^ x2[n + Nc];
+  }
+}
+
+// TS 38.211 6.4.1.1 PUSCH DM-RS (transform precoding disabled, single port / CDM group 0,
+// Delta = 0): generates the known reference QPSK symbol on every DM-RS resource element of
+// one OFDM symbol, zero elsewhere. Returns an empty-everywhere vector when the DM-RS identity
+// (scramblingId) is unknown, so the caller falls back to the blind statistical estimate.
+std::vector<cd> pushDmrsReferenceSymbol(const DmrsConfig& dmrs, int slotNumber, int symbolInSlot, int numSc)
+{
+  std::vector<cd> ref(static_cast<size_t>(std::max(0, numSc)), cd(0.0, 0.0));
+  if (dmrs.scramblingId < 0 || numSc <= 0) {
+    return ref;
+  }
+  const long long nid = dmrs.scramblingId;
+  // 6.4.1.1.1.1: cinit = 2^17 (14 n_s,f^mu + l + 1)(2 N_ID + 1) + 2 N_ID + n_SCID, mod 2^31
+  const long long cinit =
+      ((1LL << 17) * (14LL * slotNumber + symbolInSlot + 1) * (2LL * nid + 1) + 2LL * nid + dmrs.nSCID) & 0x7FFFFFFFLL;
+  const int maxM = numSc / 2 + 2; // upper bound for both configuration types
+  std::vector<int> c;
+  goldSequence(static_cast<unsigned>(cinit), static_cast<size_t>(2 * maxM), c);
+  const auto r = [&](int m) {
+    return cd((1.0 - 2.0 * c[2 * m]) / std::sqrt(2.0), (1.0 - 2.0 * c[2 * m + 1]) / std::sqrt(2.0));
+  };
+  if (dmrs.configurationType2) {
+    // 6.4.1.1.3: configuration type 2, k = 6n + k' + Delta, Delta = 0 (port 0 / CDM group 0)
+    for (int n = 0; 6 * n + 1 < numSc; ++n) {
+      ref[6 * n] = r(2 * n);
+      ref[6 * n + 1] = r(2 * n + 1);
+    }
+  } else {
+    // configuration type 1, k = 4n + 2k' + Delta, Delta = 0
+    for (int n = 0; 4 * n + 2 < numSc; ++n) {
+      ref[4 * n] = r(2 * n);
+      ref[4 * n + 2] = r(2 * n + 1);
+    }
+  }
+  return ref;
+}
+
 struct EqualizedGrid {
   std::vector<std::vector<cd> > z;      // [symbol][point] equalized (time domain for DFT-s-OFDM)
   std::vector<std::vector<cd> > ref;    // hard decisions
@@ -707,17 +763,18 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
 }
 
 DmrsConfig::DmrsConfig()
-  : exclude(true), mappingTypeB(false), typeAPosition(2), additionalPositions(0), doubleSymbol(false)
+    : exclude(true), mappingTypeB(false), typeAPosition(2), additionalPositions(0), doubleSymbol(false),
+      configurationType2(false), scramblingId(-1), nSCID(0), startSlotNumber(0)
 {
 }
 
 Config::Config()
-  : numerology(1), fftSize(0), frequencyRange(FR1), channelBandwidthMHz(0), numResourceBlocks(0),
-    resourceBlockOffset(0), extendedCp(false), modulation(MOD_AUTO), maxSymbols(0),
-    burstSearch(true), burstSearchThresholdDb(-20.0), timingSearch(true), syncSearchSymbols(4), cfoCorrection(true), carrierOffsetHz(0.0),
-    equalize(true), equalizerIterations(3), phaseTracking(true), timingTracking(true), amplitudeTracking(true),
-    transformPrecoding(false),
-    dcPunctured(false), removeIqOffset(false), symbolTimingAdjustmentPercent(-3.125), resample(true), sampleRate(0.0)
+    : numerology(1), fftSize(0), frequencyRange(FR1), channelBandwidthMHz(0), numResourceBlocks(0),
+      resourceBlockOffset(0), extendedCp(false), modulation(MOD_AUTO), maxSymbols(0), burstSearch(true),
+      burstSearchThresholdDb(-20.0), timingSearch(true), syncSearchSymbols(4), cfoCorrection(true),
+      carrierOffsetHz(0.0), equalize(true), equalizerIterations(3), phaseTracking(true), timingTracking(true),
+      amplitudeTracking(true), transformPrecoding(false), dcPunctured(false), removeIqOffset(false),
+      symbolTimingAdjustmentPercent(-3.125), resample(true), sampleRate(0.0), ssbSearch(true)
 {
 }
 
@@ -875,22 +932,43 @@ void dft(std::vector<cd>& a, bool inverse)
     return;
   }
   // Bluestein: X[k] = w[k] * sum_n (x[n] w[n]) conj(w[k-n]),  w[n] = exp(-j pi n^2 / m)
-  size_t l = 1;
-  while (l < 2 * m - 1) l <<= 1;
-  const double sign = inverse ? 1.0 : -1.0;
-  std::vector<cd> w(m);
-  for (size_t n = 0; n < m; ++n) {
-    const double phase = sign * PI * static_cast<double>((n * n) % (2 * m)) / static_cast<double>(m);
-    w[n] = std::polar(1.0, phase);
+  // w[] and FFT(fb) depend only on (m, inverse), not on the input data: the same non-power-
+  // of-two grid size is reused for every OFDM symbol in a capture (and across EqualizedGrid's
+  // iterative refinement passes), so caching them avoids recomputing an O(l log l) FFT plus an
+  // O(m) twiddle-factor table on every single call for an unchanged (m, inverse) pair.
+  thread_local size_t sCachedM = 0;
+  thread_local bool sCachedInverse = false;
+  thread_local std::vector<cd> sCachedW, sCachedFb;
+  size_t l;
+  if (sCachedM == m && sCachedInverse == inverse) {
+    l = sCachedFb.size();
+  } else {
+    l = 1;
+    while (l < 2 * m - 1)
+      l <<= 1;
+    const double sign = inverse ? 1.0 : -1.0;
+    sCachedW.assign(m, cd(0.0, 0.0));
+    for (size_t n = 0; n < m; ++n) {
+      const double phase = sign * PI * static_cast<double>((n * n) % (2 * m)) / static_cast<double>(m);
+      sCachedW[n] = std::polar(1.0, phase);
+    }
+    sCachedFb.assign(l, cd(0.0, 0.0));
+    for (size_t n = 0; n < m; ++n) {
+      sCachedFb[n] = std::conj(sCachedW[n]);
+      if (n > 0)
+        sCachedFb[l - n] = std::conj(sCachedW[n]);
+    }
+    fft(sCachedFb, false);
+    sCachedM = m;
+    sCachedInverse = inverse;
   }
-  std::vector<cd> fa(l, cd(0.0, 0.0)), fb(l, cd(0.0, 0.0));
+  const std::vector<cd>& w = sCachedW;
+  const std::vector<cd>& fb = sCachedFb;
+  std::vector<cd> fa(l, cd(0.0, 0.0));
   for (size_t n = 0; n < m; ++n) {
     fa[n] = a[n] * w[n];
-    fb[n] = std::conj(w[n]);
-    if (n > 0) fb[l - n] = std::conj(w[n]);
   }
   fft(fa, false);
-  fft(fb, false);
   for (size_t i = 0; i < l; ++i) fa[i] *= fb[i];
   fft(fa, true);
   const double invL = 1.0 / static_cast<double>(l);
@@ -1333,7 +1411,7 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
   Modulation mod = static_cast<Modulation>(cfg.modulation);
   std::vector<std::vector<bool>> resourceMask(numSym, std::vector<bool>(numSc, false));
   std::vector<cd> phaseReference(numSc, cd(0.0, 0.0));
-  if (!cfg.transformPrecoding && numSc >= 240) {
+  if (cfg.ssbSearch && !cfg.transformPrecoding && numSc >= 240) {
     std::vector<int> sequence(127 + 7, 0);
     const int initial[] = {0, 1, 1, 0, 1, 1, 1};
     std::copy(initial, initial + 7, sequence.begin());
@@ -1655,11 +1733,40 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
     r.commonPhaseErrorDeg = std::sqrt(acc / static_cast<double>(numIncluded)) * 180.0 / PI;
   }
 
-  // blind DM-RS statistics: the reference sequence is QPSK with constant amplitude on a
-  // comb (TS 38.211 6.4.1.1.3: type 1 every other subcarrier, type 2 two of six); the other
+  // DM-RS statistics: when the scrambling identity is known (TS 38.211 6.4.1.1.1.1) the true
+  // Gold sequence reference is regenerated and the EVM is exact; otherwise fall back to the
+  // blind statistical estimate below (reference sequence is QPSK with constant amplitude on a
+  // comb, TS 38.211 6.4.1.1.3: type 1 every other subcarrier, type 2 two of six; the other
   // resource elements may be empty or carry data of the second CDM group. The comb is the
-  // resource element set with the smallest power variation.
-  if (!r.dmrsSymbols.empty()) {
+  // resource element set with the smallest power variation).
+  if (!r.dmrsSymbols.empty() && cfg.dmrs.scramblingId >= 0 && !cfg.transformPrecoding) {
+    const int dmrsSlotBase = slotStart % dmrsPerSlot;
+    double err = 0.0, refPow = 0.0, pilotPow = 0.0;
+    size_t pilots = 0;
+    for (size_t d = 0; d < r.dmrsSymbols.size(); ++d) {
+      const int symbol = r.dmrsSymbols[d];
+      const int symbolInSlot =
+          dmrsSlotBase == 0 ? symbol % dmrsPerSlot : (symbol - dmrsSlotBase + dmrsPerSlot) % dmrsPerSlot;
+      const int slotNumber =
+          cfg.dmrs.startSlotNumber +
+          (dmrsSlotBase == 0 ? symbol / dmrsPerSlot : (symbol - dmrsSlotBase + dmrsPerSlot) / dmrsPerSlot);
+      const std::vector<cd> ref = pushDmrsReferenceSymbol(cfg.dmrs, slotNumber, symbolInSlot, numSc);
+      const std::vector<cd>& yd = y[symbol];
+      for (int i = 0; i < numSc; ++i) {
+        if (excludedSc[i] || std::abs(ref[i]) == 0.0 || !(std::abs(g.channel[i]) > 0.0))
+          continue;
+        const cd z = yd[i] / g.channel[i];
+        err += std::norm(z - ref[i]);
+        refPow += std::norm(ref[i]);
+        pilotPow += std::norm(z);
+        ++pilots;
+      }
+    }
+    if (pilots > 0) {
+      r.dmrsEvmPercent = refPow > 0.0 ? 100.0 * std::sqrt(err / refPow) : 0.0;
+      r.dmrsPowerDb = 10.0 * std::log10(pilotPow / static_cast<double>(pilots) + 1e-30);
+    }
+  } else if (!r.dmrsSymbols.empty()) {
     std::vector<std::vector<cd> > zd(r.dmrsSymbols.size(), std::vector<cd>(numSc));
     for (size_t d = 0; d < r.dmrsSymbols.size(); ++d) {
       const std::vector<cd>& yd = y[r.dmrsSymbols[d]];
@@ -1895,12 +2002,21 @@ std::vector<std::complex<float> > generateTestSignal(const Config& cfg, int numS
     const bool isDmrs = cfg.dmrs.exclude &&
         std::find(dmrsPos.begin(), dmrsPos.end(), j % perSlot) != dmrsPos.end();
     std::vector<cd> d(numSc);
+    const std::vector<cd> realDmrsRef =
+        isDmrs && cfg.dmrs.scramblingId >= 0
+            ? pushDmrsReferenceSymbol(cfg.dmrs, cfg.dmrs.startSlotNumber + j / perSlot, j % perSlot, numSc)
+            : std::vector<cd>();
     for (int i = 0; i < numSc; ++i) {
       if (isDmrs) {
-        // pseudo random QPSK reference sequence (noise like in time domain, as a Gold
-        // sequence based DM-RS), not part of the data grid
-        state = state * 1664525u + 1013904223u;
-        d[i] = std::polar(1.0, PI / 4.0 + PI / 2.0 * static_cast<double>((state >> 16) % 4u));
+        if (!realDmrsRef.empty()) {
+          // TS 38.211 6.4.1.1 Gold sequence DM-RS (matches pushDmrsReferenceSymbol in demodulate())
+          d[i] = realDmrsRef[i];
+        } else {
+          // pseudo random QPSK reference sequence (noise like in time domain, as a Gold
+          // sequence based DM-RS), not part of the data grid
+          state = state * 1664525u + 1013904223u;
+          d[i] = std::polar(1.0, PI / 4.0 + PI / 2.0 * static_cast<double>((state >> 16) % 4u));
+        }
       } else {
         d[i] = cd(nextLevel() * s, nextLevel() * s);
         if (referenceOut) referenceOut->push_back(d[i]);
