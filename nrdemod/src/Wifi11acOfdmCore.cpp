@@ -509,6 +509,7 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
     }
     samples = &work;
     burstStart /= osr;
+    burstLength /= osr; // keeps burstEnd in the decimated domain, or trailing padding gets counted as DATA symbols
   }
 
   // --- L-STF/L-LTF burst timing, channel estimate and CFO: identical to wifi/WifiOfdmCore.cpp ---
@@ -587,16 +588,15 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
     return sym;
   };
 
-  // Pilot-tracked phase correction + legacy 48-subcarrier hard-decision bits for one BPSK OFDM
-  // symbol (used for both VHT-SIG-A symbols, both of which are plain BPSK per 21.3.8.3.3 -
-  // unlike HT-SIG's second symbol, VHT-SIG-A has no QBPSK rotation on either symbol).
-  const auto decodeLegacyGridSymbolBits = [&](const std::vector<cd>& sym, double pPilot) -> std::vector<int> {
+  // Pilot-tracked phase correction + legacy 48-subcarrier hard-decision bits for one BPSK/QBPSK OFDM
+  // symbol: VHT-SIG-A1 is plain BPSK, VHT-SIG-A2 is QBPSK (data tones rotated by 90 degrees, 21.3.8.3.3).
+  const auto decodeLegacyGridSymbolBits = [&](const std::vector<cd>& sym, double pPilot, bool qbpsk) -> std::vector<int> {
     cd pilotBeta(0.0, 0.0);
     for (const int k : {-21, -7, 7, 21}) {
       pilotBeta += sym[fftBin(k)] * std::conj(cd(pilotBaseSign(k) * pPilot, 0.0)) / channel[fftBin(k)];
     }
     const double beta = std::abs(pilotBeta) > 0.0 ? std::arg(pilotBeta) : 0.0;
-    const cd rotation = std::polar(1.0, -beta);
+    const cd rotation = std::polar(1.0, -beta) * (qbpsk ? std::polar(1.0, -PI / 2.0) : cd(1.0, 0.0));
     std::vector<int> bits(48);
     int idx = 0;
     for (int k = -26; k <= 26; ++k) {
@@ -622,8 +622,8 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
   const std::vector<cd> sigA1Sym = fftSymbolAt(vhtSigA1Start);
   const std::vector<cd> sigA2Sym = fftSymbolAt(vhtSigA2Start);
   // p_n index continuing from the two L-LTF symbols (-2/-1): L-SIG=0, VHT-SIG-A1=1, VHT-SIG-A2=2.
-  const std::vector<int> sigA1BitsInterleaved = decodeLegacyGridSymbolBits(sigA1Sym, polarity[1]);
-  const std::vector<int> sigA2BitsInterleaved = decodeLegacyGridSymbolBits(sigA2Sym, polarity[2]);
+  const std::vector<int> sigA1BitsInterleaved = decodeLegacyGridSymbolBits(sigA1Sym, polarity[1], false);
+  const std::vector<int> sigA2BitsInterleaved = decodeLegacyGridSymbolBits(sigA2Sym, polarity[2], true);
   const std::vector<int> sigA1Coded = deinterleaveSignalField(sigA1BitsInterleaved);
   const std::vector<int> sigA2Coded = deinterleaveSignalField(sigA2BitsInterleaved);
   // Each symbol is independently BCC rate-1/2 encoded (21.3.8.3.3: unlike HT-SIG's two symbols
@@ -650,6 +650,23 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
   // diagnostic visibility but deliberately do NOT gate result.ok (same policy as HT-SIG and
   // the still-undecoded 802.11b CCK bit mapping) in case a given capture's values disagree.
   const int bw = (sigA1Bits[0] | (sigA1Bits[1] << 1));
+  // CRC-8 (x^8+x^2+x+1, register preset to ones, complemented, MSB first) over SIG-A1 and SIG-A2 b0-b9.
+  // The TDC 11ac captures carry SIG-A2 bits that fail it (MCS LSB reads low), so MCS is then not trusted.
+  bool sigAValid = true;
+  {
+    unsigned reg = 0xFFu;
+    const auto feed = [&](int bit) {
+      const unsigned fb = ((reg >> 7) & 1u) ^ static_cast<unsigned>(bit);
+      reg = (reg << 1) & 0xFFu;
+      if (fb) reg ^= 0x07u;
+    };
+    for (int b = 0; b < 24; ++b) feed(sigA1Bits[b]);
+    for (int b = 0; b < 10; ++b) feed(sigA2Bits[b]);
+    const unsigned crc = ~reg & 0xFFu;
+    for (int b = 0; b < 8; ++b) {
+      if (static_cast<int>((crc >> (7 - b)) & 1u) != sigA2Bits[10 + b]) sigAValid = false;
+    }
+  }
   const int nstsField = sigA1Bits[10] | (sigA1Bits[11] << 1) | (sigA1Bits[12] << 2);
   int mcs = 0;
   for (int b = 3; b >= 0; --b) mcs = (mcs << 1) | sigA2Bits[4 + b];
@@ -690,10 +707,8 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
   std::vector<int> firstPerm, secondPerm;
   vhtDataInterleaverIndices(mcsParams.nBpsc, cbps, firstPerm, secondPerm);
 
-  double evmSumSquares = 0.0;
-  double evmPeak = -1.0;
-  long long evmCount = 0;
-  int peakSymbol = 0, peakSubcarrier = 0;
+  std::vector<cd> allEqualized;
+  allEqualized.reserve(static_cast<size_t>(nSym) * VHT_DATA_CARRIERS);
 
   for (int sym = 0; sym < nSym; ++sym) {
     const int dataFftStart = dataFieldStart + 80 * sym;
@@ -703,12 +718,18 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
     // p_n index continues from VHT-SIG-A2 (index 2) through VHT-STF/VHT-LTF/VHT-SIG-B (indices
     // 3,4,5, not pilot-tracked) to the first DATA symbol at index 6, i.e. (sym + 6) % 127.
     const double pData = polarity[(sym + 6) % 127];
+    // VHT data pilots cycle {1,1,1,-1} by one position per data symbol; a mismatched pattern makes the
+    // four-pilot sum cancel and the phase estimate random.
+    static const double vhtPilotBase[4] = {1.0, 1.0, 1.0, -1.0};
+    const int vhtPilotK[4] = {-21, -7, 7, 21};
     cd pilotBeta(0.0, 0.0);
-    for (const int k : {-21, -7, 7, 21}) {
-      pilotBeta += dataSym[fftBin(k)] * std::conj(cd(pilotBaseSign(k) * pData, 0.0)) / channel[fftBin(k)];
+    for (int j = 0; j < 4; ++j) {
+      const int k = vhtPilotK[j];
+      pilotBeta += dataSym[fftBin(k)] * std::conj(cd(vhtPilotBase[(j + sym) % 4] * pData, 0.0)) / channel[fftBin(k)];
     }
     const double beta = std::abs(pilotBeta) > 0.0 ? std::arg(pilotBeta) : 0.0;
-    const cd rotation = std::polar(1.0, -beta);
+    // L-LTF tones are scaled by 1/sqrt(52), the 56-tone VHT data field by 1/sqrt(56)
+    const cd rotation = std::polar(std::sqrt(56.0 / 52.0), -beta);
 
     std::vector<cd> equalized(VHT_DATA_CARRIERS);
     int idx = 0;
@@ -719,21 +740,56 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
       if (estK < -26) estK = -26;
       equalized[idx++] = dataSym[fftBin(k)] / channel[fftBin(estK)] * rotation;
     }
-    for (int c = 0; c < VHT_DATA_CARRIERS; ++c) {
-      const cd decision = hardDecision(equalized[c], mcsParams.modulation);
-      const double err = std::norm(equalized[c] - decision);
-      const double refPower = std::norm(decision) > 0.0 ? std::norm(decision) : 1.0;
-      const double evmFraction = err / refPower;
-      evmSumSquares += evmFraction;
-      ++evmCount;
-      if (evmFraction > evmPeak) {
-        evmPeak = evmFraction;
-        peakSymbol = sym;
-        peakSubcarrier = c;
-      }
-    }
+    for (int c = 0; c < VHT_DATA_CARRIERS; ++c) allEqualized.push_back(equalized[c]);
   }
 
+  // The burst detector's smoothing window can run past the real end of the PPDU: drop trailing
+  // symbols whose power is far below the frame's median, they are padding, not DATA.
+  {
+    const size_t numSyms = allEqualized.size() / VHT_DATA_CARRIERS;
+    std::vector<double> symPower(numSyms, 0.0);
+    for (size_t s = 0; s < numSyms; ++s) {
+      for (int c = 0; c < VHT_DATA_CARRIERS; ++c) symPower[s] += std::norm(allEqualized[s * VHT_DATA_CARRIERS + c]);
+    }
+    std::vector<double> sorted = symPower;
+    std::sort(sorted.begin(), sorted.end());
+    const double median = numSyms > 0 ? sorted[numSyms / 2] : 0.0;
+    size_t keep = numSyms;
+    while (keep > 0 && symPower[keep - 1] < 0.25 * median) --keep;
+    allEqualized.resize(keep * VHT_DATA_CARRIERS);
+    result.numDataSymbols = static_cast<int>(keep);
+  }
+
+  // With a failing SIG-A CRC the decoded MCS is not trusted: take the lowest-order modulation whose
+  // nearest-point EVM over the whole burst is within 5 % (higher orders always fit at least as well).
+  Modulation usedModulation = mcsParams.modulation;
+  const auto evmOver = [&](Modulation mod, double* peakFraction, int* peakIndex) {
+    double sum = 0.0, peak = -1.0;
+    int peakAt = 0;
+    for (size_t i = 0; i < allEqualized.size(); ++i) {
+      const cd decision = hardDecision(allEqualized[i], mod);
+      const double refPower = std::norm(decision) > 0.0 ? std::norm(decision) : 1.0;
+      const double f = std::norm(allEqualized[i] - decision) / refPower;
+      sum += f;
+      if (f > peak) { peak = f; peakAt = static_cast<int>(i); }
+    }
+    if (peakFraction) *peakFraction = peak;
+    if (peakIndex) *peakIndex = peakAt;
+    return allEqualized.empty() ? 0.0 : sum / static_cast<double>(allEqualized.size());
+  };
+  if (!sigAValid) {
+    usedModulation = MOD_QAM256;
+    for (const Modulation mod : {MOD_BPSK, MOD_QPSK, MOD_QAM16, MOD_QAM64, MOD_QAM256}) {
+      if (std::sqrt(evmOver(mod, nullptr, nullptr)) <= 0.05) { usedModulation = mod; break; }
+    }
+    result.modulation = usedModulation;
+  }
+  double evmPeak = -1.0;
+  int peakAt = 0;
+  const double evmSumSquares = evmOver(usedModulation, &evmPeak, &peakAt) * static_cast<double>(allEqualized.size());
+  const long long evmCount = static_cast<long long>(allEqualized.size());
+  const int peakSymbol = peakAt / VHT_DATA_CARRIERS;
+  const int peakSubcarrier = peakAt % VHT_DATA_CARRIERS;
   result.rmsEvmPercent = evmCount > 0 ? 100.0 * std::sqrt(evmSumSquares / static_cast<double>(evmCount)) : 0.0;
   result.peakEvmPercent = evmPeak >= 0.0 ? 100.0 * std::sqrt(evmPeak) : 0.0;
   result.peakEvmSymbolIndex = peakSymbol;

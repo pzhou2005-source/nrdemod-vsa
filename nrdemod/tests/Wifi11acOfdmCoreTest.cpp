@@ -186,7 +186,7 @@ std::vector<cd> buildVhtPacket(int mcs, int numDataSymbols, double frequencyErro
       sigA2Freq[bin(k)] = cd(pilotBaseSign(k) * polarity[2], 0.0);
     } else if (isLegacyData(k)) {
       sigA1Freq[bin(k)] = sigA1Interleaved[idx1++] ? cd(1, 0) : cd(-1, 0);
-      sigA2Freq[bin(k)] = sigA2Interleaved[idx2++] ? cd(1, 0) : cd(-1, 0);
+      sigA2Freq[bin(k)] = sigA2Interleaved[idx2++] ? cd(0, 1) : cd(0, -1); // VHT-SIG-A2 is QBPSK
     }
   }
   std::vector<cd> sigA1WithGi = withGuardInterval(ofdmSymbolFromFreq(sigA1Freq), 16);
@@ -210,7 +210,12 @@ std::vector<cd> buildVhtPacket(int mcs, int numDataSymbols, double frequencyErro
     std::vector<cd> dataFreq(FFT_SIZE, cd(0, 0));
     const int dataN = (sym + 6) % 127;
     for (int k = -28; k <= 28; ++k) {
-      if (isPilot(k)) dataFreq[bin(k)] = cd(pilotBaseSign(k) * polarity[dataN], 0.0);
+      if (isPilot(k)) {
+        // VHT data pilots cycle {1,1,1,-1} by one position per symbol
+        const int j = (k == -21) ? 0 : (k == -7) ? 1 : (k == 7) ? 2 : 3;
+        const double base[4] = {1.0, 1.0, 1.0, -1.0};
+        dataFreq[bin(k)] = cd(base[(j + sym) % 4] * polarity[dataN], 0.0);
+      }
       else if (isVhtData(k)) dataFreq[bin(k)] = uniform() < 0.5 ? cd(1, 0) : cd(-1, 0);
     }
     std::vector<cd> dataTime = ofdmSymbolFromFreq(dataFreq);

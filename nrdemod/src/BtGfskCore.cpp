@@ -229,12 +229,44 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
   // Carrier frequency error: mean instantaneous frequency over the preamble, which by
   // construction has zero mean modulating data (alternating +/-1 symbols), so any residual
   // mean is the carrier offset (same quantity the legacy library reports as F0/Icft).
+  // The burst starts with a silent / ramping lead-in, so the mean is taken over a whole number of
+  // alternating symbol pairs found inside the steady preamble, not from the first burst sample.
   const int preambleSamples = static_cast<int>(std::llround(8 * samplesPerSymbol));
+  const int probe = std::min(16, static_cast<int>(burstLength / samplesPerSymbol));
+  std::vector<double> symbolMean(probe, 0.0);
+  double peakMean = 0.0;
+  for (int k = 0; k < probe; ++k) {
+    const int a = burstStart + bestPhase + static_cast<int>(std::llround(k * samplesPerSymbol));
+    const int b = std::min(burstStart + burstLength, a + static_cast<int>(std::llround(samplesPerSymbol)));
+    double s = 0.0;
+    for (int i = a; i < b; ++i) s += freqHz[i];
+    symbolMean[k] = b > a ? s / (b - a) : 0.0;
+    peakMean = std::max(peakMean, std::fabs(symbolMean[k]));
+  }
+  const int window = 4; // symbols, an even count so the alternating data averages to zero
+  int steadyStart = -1;
+  for (int k = 0; k + 1 + window <= probe && steadyStart < 0; ++k) {
+    bool alternates = std::fabs(symbolMean[k]) > 0.5 * peakMean;
+    for (int j = k; alternates && j < k + 1 + window; ++j) {
+      alternates = std::fabs(symbolMean[j]) > 0.5 * peakMean &&
+                   (j == k || symbolMean[j] * symbolMean[j - 1] < 0.0);
+    }
+    if (alternates) steadyStart = k + 1; // skip the first symbol, it carries the discriminator overshoot
+  }
   double freqSum = 0.0;
   int freqCount = 0;
-  for (int i = burstStart; i < burstStart + std::min(preambleSamples, burstLength); ++i) {
-    freqSum += freqHz[i];
-    ++freqCount;
+  if (steadyStart >= 0) {
+    const int a = burstStart + bestPhase + static_cast<int>(std::llround(steadyStart * samplesPerSymbol));
+    const int b = a + static_cast<int>(std::llround(window * samplesPerSymbol));
+    for (int i = a; i < b && i < burstStart + burstLength; ++i) {
+      freqSum += freqHz[i];
+      ++freqCount;
+    }
+  } else {
+    for (int i = burstStart; i < burstStart + std::min(preambleSamples, burstLength); ++i) {
+      freqSum += freqHz[i];
+      ++freqCount;
+    }
   }
   result.frequencyErrorHz = freqCount > 0 ? freqSum / freqCount : 0.0;
 

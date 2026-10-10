@@ -469,9 +469,28 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
   // start, skipping its GI); adding a further 80 (one full symbol period) to a FFT-window
   // start lands exactly on the next field's FFT-window start. From htSig2Start, three +80
   // steps pass over HT-STF and HT-LTF to land on DATA symbol 0's FFT window.
-  const int htSig1Start = bestPos + 2 * FFT_SIZE + 80 + 16;
+  // A greenfield PPDU has no L-SIG: the symbol right after the (HT-)LTF is already a QBPSK HT-SIG1,
+  // whereas in mixed format that slot is the plain-BPSK L-SIG. Tell them apart by the rotation.
+  const int slot0Start = bestPos + 2 * FFT_SIZE + 16;
+  if (slot0Start + FFT_SIZE > static_cast<int>(samples->size())) {
+    result.error = "capture too short for HT-SIG";
+    return result;
+  }
+  bool greenfield = false;
+  {
+    const std::vector<cd> slot0 = fftSymbolAt(slot0Start);
+    cd sumSquares(0.0, 0.0);
+    for (int k = -26; k <= 26; ++k) {
+      if (!isLegacyDataSubcarrier(k)) continue;
+      const cd eq = slot0[fftBin(k)] / channel[fftBin(k)];
+      sumSquares += eq * eq;
+    }
+    greenfield = sumSquares.real() < 0.0;
+  }
+  const int htSig1Start = greenfield ? slot0Start : bestPos + 2 * FFT_SIZE + 80 + 16;
   const int htSig2Start = htSig1Start + 80;
-  const int dataFieldStart = htSig2Start + 80 + 80 + 80; // + HT-STF + HT-LTF, FFT-aligned to DATA symbol 0
+  // mixed: + HT-STF + HT-LTF; greenfield: the single HT-LTF already preceded HT-SIG
+  const int dataFieldStart = htSig2Start + (greenfield ? 80 : 80 + 80 + 80);
   if (htSig2Start + FFT_SIZE > static_cast<int>(samples->size())) {
     result.error = "capture too short for HT-SIG";
     return result;
@@ -479,10 +498,10 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
 
   const std::vector<cd> htSig1Sym = fftSymbolAt(htSig1Start);
   const std::vector<cd> htSig2Sym = fftSymbolAt(htSig2Start);
-  // p_n index (19.3.5.9-style numbering continuing from the two L-LTF symbols at index -2/-1):
-  // L-SIG=0, HT-SIG1=1, HT-SIG2=2.
-  const std::vector<int> htSig1BitsInterleaved = decodeLegacyGridSymbolBits(htSig1Sym, polarity[1], false);
-  const std::vector<int> htSig2BitsInterleaved = decodeLegacyGridSymbolBits(htSig2Sym, polarity[2], true);
+  // p_n index numbering: mixed L-SIG=0, HT-SIG1=1, HT-SIG2=2; greenfield starts at HT-SIG1.
+  const int sigPolBase = greenfield ? 0 : 1;
+  const std::vector<int> htSig1BitsInterleaved = decodeLegacyGridSymbolBits(htSig1Sym, polarity[sigPolBase], true);
+  const std::vector<int> htSig2BitsInterleaved = decodeLegacyGridSymbolBits(htSig2Sym, polarity[sigPolBase + 1], true);
   const std::vector<int> htSig1Deinterleaved = deinterleaveSignalField(htSig1BitsInterleaved);
   const std::vector<int> htSig2Deinterleaved = deinterleaveSignalField(htSig2BitsInterleaved);
 
@@ -494,17 +513,10 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
   // HT-SIG field layout (19.3.9.4.3), all sub-fields transmitted LSB first:
   // bits[0..6]=MCS, bit[7]=CBW, bits[8..23]=HT_LENGTH, bits[24..47]=HT-SIG2 fields (unused here).
   //
-  // NOTE: unlike every other field this core decodes (L-STF/L-LTF sync, channel estimate, and
-  // L-SIG itself, all independently verified against real captures - L-SIG reliably decodes to
-  // the expected rate=0x0D "6 Mb/s" marker on every available real HT capture), the exact
-  // bit-level HT-SIG convention (pilot-tracking/rotation applied to the two HT-SIG OFDM symbols,
-  // and the resulting MCS/HT_LENGTH field values) could NOT be verified: extensive testing
-  // against all 8 real 20 MHz TDC captures - including porting the openofdm open-source
-  // project's own reference HT-SIG decoder verbatim - did not reproduce the expected MCS for
-  // any capture. Rather than report a value that cannot be trusted, HT-SIG content is treated
-  // as unverified: result.mcsIndex/bandwidthMHz/psduLengthBytes below are deliberately NOT used
-  // to gate ok/error (same policy as the still-undecoded 802.11b CCK bit mapping), and the
-  // scope of this core is for now limited to burst/sync and L-SIG verification.
+  // The TDC 8 real 20 MHz captures are GREENFIELD PPDUs (no L-SIG, both HT-SIG symbols QBPSK right
+  // after the HT-LTF1); decoding them as mixed format was why HT-SIG never matched. With the
+  // greenfield layout above MCS0-7 decode correctly on all of them. Content is still not used to
+  // gate ok/error.
   int mcs = 0;
   for (int b = 6; b >= 0; --b) mcs = (mcs << 1) | htSigBits[b];
   const int cbw = htSigBits[7];
@@ -558,11 +570,16 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
     const std::vector<cd> dataSym = fftSymbolAt(dataFftStart);
 
     // p_n index continues from HT-SIG2 (index 2) through HT-STF/HT-LTF (indices 3,4, not
-    // pilot-tracked) to the first DATA symbol at index 5, i.e. (sym + 5) % 127.
-    const double pData = polarity[(sym + 5) % 127];
+    // pilot-tracked) to the first DATA symbol at index 5 in mixed format, from index 2 in greenfield.
+    const double pData = polarity[(sym + (greenfield ? 2 : 5)) % 127];
+    // HT data pilots (19.3.11.10, Nss=1, 20 MHz) cycle {1,1,1,-1} by one position per data symbol,
+    // unlike the fixed legacy pattern; a mismatched pattern makes the four-pilot sum cancel.
+    static const double htPilotBase[4] = {1.0, 1.0, 1.0, -1.0};
+    const int htPilotK[4] = {-21, -7, 7, 21};
     cd pilotBeta(0.0, 0.0);
-    for (const int k : {-21, -7, 7, 21}) {
-      pilotBeta += dataSym[fftBin(k)] * std::conj(cd(pilotBaseSign(k) * pData, 0.0)) / channel[fftBin(k)];
+    for (int j = 0; j < 4; ++j) {
+      const int k = htPilotK[j];
+      pilotBeta += dataSym[fftBin(k)] * std::conj(cd(htPilotBase[(j + sym) % 4] * pData, 0.0)) / channel[fftBin(k)];
     }
     const double beta = std::abs(pilotBeta) > 0.0 ? std::arg(pilotBeta) : 0.0;
     const cd rotation = std::polar(1.0, -beta);

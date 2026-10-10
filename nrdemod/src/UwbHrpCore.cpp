@@ -67,17 +67,22 @@ bool findBurst(const std::vector<std::complex<double> >& iq, double thresholdDb,
 // recomputing std::norm() and the energyA/energyB running sums from scratch for every one of the
 // ~4000 candidate lags searched - that redundant O(windowLen) work per lag was the dominant cost
 // of UwbHrpCore::demodulate() (measured ~2x of a real capture's total native runtime).
-double periodicEnergyCorrelation(const std::vector<double>& power, const std::vector<double>& prefixPowerSq,
-                                  int start, int windowLen, int lag, int n)
+double periodicEnergyCorrelation(const std::vector<double>& power, const std::vector<double>& prefixPower,
+                                  const std::vector<double>& prefixPowerSq, int start, int windowLen, int lag, int n)
 {
   const int end = std::min(start + windowLen, n - lag);
   if (end <= start) return 0.0;
   double sum = 0.0;
   for (int i = start; i < end; ++i) sum += power[i] * power[i + lag];
-  const double energyA = prefixPowerSq[end] - prefixPowerSq[start];
-  const double energyB = prefixPowerSq[end + lag] - prefixPowerSq[start + lag];
-  const double denominator = std::sqrt(energyA * energyB);
-  return denominator > 0.0 ? sum / denominator : 0.0;
+  // Centred (Pearson) form: the uncentred product of positive power samples is ~0.5 even for pure noise.
+  const double count = static_cast<double>(end - start);
+  const double meanA = (prefixPower[end] - prefixPower[start]) / count;
+  const double meanB = (prefixPower[end + lag] - prefixPower[start + lag]) / count;
+  const double covariance = sum - count * meanA * meanB;
+  const double varA = (prefixPowerSq[end] - prefixPowerSq[start]) - count * meanA * meanA;
+  const double varB = (prefixPowerSq[end + lag] - prefixPowerSq[start + lag]) - count * meanB * meanB;
+  const double denominator = std::sqrt(std::max(varA, 0.0) * std::max(varB, 0.0));
+  return denominator > 0.0 ? covariance / denominator : 0.0;
 }
 
 // Carrier frequency error from the complex phase rotation between the burst start and one
@@ -151,25 +156,34 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
   // literal code length, so this works across BPRF/HPRF variants without a hard-coded table.
   const int minLagSamples = std::max(1, static_cast<int>(std::llround(16 * samplesPerChip)));
   const int maxLagSamples = static_cast<int>(std::llround(1024 * samplesPerChip));
-  const int windowLen = std::min(burstLength, static_cast<int>(std::llround(config.syncLength * maxLagSamples)));
 
   // Precompute |iq|^2 and a running sum-of-squares (energy prefix sum) ONCE, not per-lag - see
   // periodicEnergyCorrelation()'s comment for why this is the dominant cost of this function.
   const int n = static_cast<int>(iq.size());
   std::vector<double> power(n);
   for (int i = 0; i < n; ++i) power[i] = std::norm(iq[i]);
+  std::vector<double> prefixPower(n + 1, 0.0);
   std::vector<double> prefixPowerSq(n + 1, 0.0);
-  for (int i = 0; i < n; ++i) prefixPowerSq[i + 1] = prefixPowerSq[i] + power[i] * power[i];
+  for (int i = 0; i < n; ++i) {
+    prefixPower[i + 1] = prefixPower[i] + power[i];
+    prefixPowerSq[i + 1] = prefixPowerSq[i] + power[i] * power[i];
+  }
 
+  // The SYNC field is syncLength repetitions of one code period, so the correlation window of a
+  // candidate lag is syncLength * lag: a fixed window sized for the longest code runs into the SFD/PHR/
+  // PSDU of short-code frames and washes the correlation out.
   double bestMagnitude = -1.0;
   int bestLag = minLagSamples;
-  for (int lag = minLagSamples; lag <= maxLagSamples && burstStart + windowLen + lag <= n; ++lag) {
-    const double magnitude = periodicEnergyCorrelation(power, prefixPowerSq, burstStart, windowLen, lag, n);
+  for (int lag = minLagSamples; lag <= maxLagSamples && burstStart + lag < n; ++lag) {
+    const int lagWindow = std::min(burstLength, static_cast<int>(std::llround(config.syncLength * static_cast<double>(lag))));
+    if (burstStart + lagWindow + lag > n) break;
+    const double magnitude = periodicEnergyCorrelation(power, prefixPower, prefixPowerSq, burstStart, lagWindow, lag, n);
     if (magnitude > bestMagnitude) {
       bestMagnitude = magnitude;
       bestLag = lag;
     }
   }
+  const int windowLen = std::min(burstLength, static_cast<int>(std::llround(config.syncLength * static_cast<double>(bestLag))));
 
   result.preambleSymbolPeriodSamples = bestLag;
   result.syncRho = std::max(0.0, bestMagnitude);

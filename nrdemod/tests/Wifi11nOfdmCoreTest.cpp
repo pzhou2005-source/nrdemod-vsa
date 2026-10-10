@@ -196,7 +196,7 @@ std::vector<cd> buildHtPacket(int psduLengthBytes, double frequencyErrorHz, doub
       htSig1Freq[bin(k)] = cd(pilotBaseSign(k) * polarity[1], 0.0);
       htSig2Freq[bin(k)] = cd(pilotBaseSign(k) * polarity[2], 0.0);
     } else if (isLegacyData(k)) {
-      htSig1Freq[bin(k)] = htSig1Interleaved[idx1++] ? cd(1, 0) : cd(-1, 0);
+      htSig1Freq[bin(k)] = htSig1Interleaved[idx1++] ? cd(0, 1) : cd(0, -1); // QBPSK like HT-SIG2
       const double b2 = htSig2Interleaved[idx2++] ? 1.0 : -1.0;
       htSig2Freq[bin(k)] = cd(0.0, b2); // +90 degree QBPSK rotation
     }
@@ -222,7 +222,12 @@ std::vector<cd> buildHtPacket(int psduLengthBytes, double frequencyErrorHz, doub
     std::vector<cd> dataFreq(FFT_SIZE, cd(0, 0));
     const int dataN = (sym + 5) % 127;
     for (int k = -28; k <= 28; ++k) {
-      if (isPilot(k)) dataFreq[bin(k)] = cd(pilotBaseSign(k) * polarity[dataN], 0.0);
+      if (isPilot(k)) {
+        // HT data pilots cycle {1,1,1,-1} by one position per symbol
+        const int j = (k == -21) ? 0 : (k == -7) ? 1 : (k == 7) ? 2 : 3;
+        const double base[4] = {1.0, 1.0, 1.0, -1.0};
+        dataFreq[bin(k)] = cd(base[(j + sym) % 4] * polarity[dataN], 0.0);
+      }
       else if (isHtData(k)) dataFreq[bin(k)] = uniform() < 0.5 ? cd(1, 0) : cd(-1, 0);
     }
     std::vector<cd> dataTime = ofdmSymbolFromFreq(dataFreq);
