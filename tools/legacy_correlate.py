@@ -50,7 +50,14 @@ FAMILIES = {
     "NbIotUl": {"setx": os.path.join(_SIGNALS, "NBIoT", "NBIoT_UL_NPUSCH_1T_2RU_2Rep.setx")},
     **{d: {"demod": _DEMOD_DIGITAL} for d in BLUETOOTH},
 }
-UNSUPPORTED = {}
+# LTE/eMTC (LteFddDl/LteFddUl/LteTddUl/EmtcDl) have no verified 89600 personality/demo-setx
+# mapping here - not guessing at one, see UNSUPPORTED below.
+UNSUPPORTED = {
+    "LteFddDl": "no verified 89600 LTE personality mapping",
+    "LteFddUl": "no verified 89600 LTE personality mapping",
+    "LteTddUl": "no verified 89600 LTE personality mapping",
+    "EmtcDl": "no verified 89600 LTE personality mapping",
+}
 # plugin personalities are reached by recalling a demo setup (patched per waveform)
 SETX_FAMILIES = ("802.15.4z_HrpUwb", "NbIotDl", "NbIotUl")
 

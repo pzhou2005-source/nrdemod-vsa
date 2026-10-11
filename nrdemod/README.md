@@ -1,4 +1,4 @@
-# nrdemod — standalone 5G NR / WiFi / Bluetooth LE / UWB demodulator
+# nrdemod — standalone 5G NR / LTE / WiFi / Bluetooth / UWB demodulator
 
 Portable extract of the in-tree native demodulator cores
 (`vobs/zenith/workspace/services/Demod/Backend/src/...`) with a flat C ABI and
@@ -12,8 +12,13 @@ pybind11 / Python headers are needed.
 Two independent shared libraries are built:
 
 - `nrdemod` — 5G NR CP-OFDM / DFT-s-OFDM (`nrdemod_c.h`, module `nrdemod`).
-- `demod` — WiFi (802.11a/b/n/ac/ax/ad/be), Bluetooth LE (GFSK) and UWB
-  (802.15.4z HRP) (`demod_c.h`, module `nrdemod.demod`).
+  LTE/eMTC downlink+uplink reuse this same CP-OFDM/SC-FDMA core with an
+  explicit `numResourceBlocks` (see the in-tree `lte/LteDemodulation.cpp` for
+  the exact config this maps to); there is no separate standalone LTE module
+  since the core itself already covers it.
+- `demod` — WiFi (802.11a/b/n/ac/ax/ad/be), Bluetooth (LE1M/LE2M GFSK, classic
+  BDR GFSK burst/frequency-metrics only) and UWB (802.15.4z HRP)
+  (`demod_c.h`, module `nrdemod.demod`).
 
 ```
 include/nr/NrOfdmCore.hpp        5G NR DSP core header      (synced from the bazel tree)
@@ -25,7 +30,7 @@ include/wifi11ax/...             802.11ax (HE)              (synced from the baz
 include/wifi11ad/...             802.11ad (DMG/WiGig)       (synced from the bazel tree)
 include/wifi11b/...              802.11b (DSSS/CCK)         (synced from the bazel tree)
 include/wifi11be/...             802.11be (EHT)             (synced from the bazel tree)
-include/bt/BtGfskCore.hpp        Bluetooth LE1M/LE2M GFSK   (synced from the bazel tree)
+include/bt/BtGfskCore.hpp        Bluetooth LE1M/LE2M + BDR GFSK (synced from the bazel tree)
 include/uwb/UwbHrpCore.hpp       802.15.4z HRP-UWB          (synced from the bazel tree)
 include/nrdemod/demod_c.h        WiFi/BT/UWB flat C ABI
 src/NrOfdmCore.cpp               5G NR DSP core             (synced from the bazel tree)
@@ -120,6 +125,11 @@ res_be = demod.demodulate(demod.WIFI_BE, iq, cfg)   # 802.11be (burst/sync/CFO o
 bt_cfg = demod.Config(sampleRate=8e6, phy=1, accessAddress=0x71764129)
 res_bt = demod.demodulate(demod.BT_LE, iq, bt_cfg)  # Bluetooth LE1M
 print(res_bt.syncWordFound, res_bt.deltaFAvgHz)
+
+# phy=3 selects classic BDR (1 Msym/s GFSK): burst + frequency metrics only,
+# syncWordFound is always False (the LAP-derived sync word is not decoded).
+bdr_cfg = demod.Config(sampleRate=32e6, phy=3, modulationIndex=0.3)
+res_bdr = demod.demodulate(demod.BT_LE, iq, bdr_cfg)
 
 uwb_cfg = demod.Config(sampleRate=999.36e6)
 res_uwb = demod.demodulate(demod.UWB_HRP, iq, uwb_cfg)

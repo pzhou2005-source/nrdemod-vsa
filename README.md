@@ -15,7 +15,7 @@ nrdemod-vsa/
   configs/*.json            measurement cases (FR1 100 MHz, FR2 200 MHz, ...)
   captures/                 VSA recordings
   captures/exported/        5GNR TDC captures exported as .npy+.json (native nrdemod replay)
-  captures/tdc_reference/   WiFi/UWB/Bluetooth/NB-IoT TDC captures as raw .wfm+.para2 (legacy-only
+  captures/tdc_reference/   WiFi/UWB/Bluetooth/NB-IoT/LTE/eMTC TDC captures as raw .wfm+.para2 (legacy-only
                             standards: no native nrdemod backend, so play the .wfm directly into
                             the 89600 and compare against the recorded RESULTs in the .para2)
   captures/tdc_reference_plaintext/  same captures as unencrypted VSA_89600 .txt (no Signal Studio
@@ -29,7 +29,7 @@ nrdemod-vsa/
 Produced by `pack_for_windows.sh [output.zip] [--waveforms <export-dir>] [--tdc-reference <TDC-root>]
 [--tdc-reference-plaintext <converted-dir>]` in the main repo: `--waveforms` bundles the 5GNR
 native-replay export (`captures/exported/`), `--tdc-reference` bundles the raw encrypted
-WiFi/UWB/Bluetooth/NB-IoT TDC pairs (`captures/tdc_reference/`), `--tdc-reference-plaintext` bundles
+WiFi/UWB/Bluetooth/NB-IoT/LTE/eMTC TDC pairs (`captures/tdc_reference/`), `--tdc-reference-plaintext` bundles
 the same captures converted to unencrypted VSA_89600 `.txt` (`captures/tdc_reference_plaintext/`) via
 the in-tree `testDemod_ConvertTdcWaveformsToUnencryptedVsa89600` test
 (`NR_DEMOD_REFERENCE_WAVEFORM_CONVERT_OUTPUT`).

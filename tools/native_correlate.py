@@ -1,8 +1,8 @@
 """Correlate the new native WiFi / Bluetooth LE / UWB demodulators (nrdemod.demod) with the 89600 VSA.
 
 The VSA side is read from reports/legacy_correlation.csv (produced by legacy_correlate.py), the native side is
-run here on the same plaintext waveforms. Families without a native core (NB-IoT, Bluetooth BDR/EDR/LR) are listed
-as unsupported.
+run here on the same plaintext waveforms. Families without a native core (NB-IoT, LTE/eMTC,
+Bluetooth BDR/EDR/LR) are listed as unsupported.
 
     python tools/native_correlate.py --list
     python tools/native_correlate.py                       # everything, writes reports/native_correlation.csv
@@ -39,6 +39,10 @@ BT_FREQ_TOL_HZ = 300.0  # the VSA's own FskCarrOffs scatters by up to ~220 Hz on
 NO_NATIVE = {
     "NbIotDl": "no native NB-IoT core",
     "NbIotUl": "no native NB-IoT core",
+    "LteFddDl": "no verified 89600 LTE personality mapping (see legacy_correlate.py)",
+    "LteFddUl": "no verified 89600 LTE personality mapping (see legacy_correlate.py)",
+    "LteTddUl": "no verified 89600 LTE personality mapping (see legacy_correlate.py)",
+    "EmtcDl": "no verified 89600 LTE personality mapping (see legacy_correlate.py)",
     "BluetoothBdr": "native BT core is LE only (no BR GFSK)",
     "BluetoothEdr": "native BT core is LE only (no EDR DPSK)",
     "BluetoothLeCodedS8": "native BT core handles uncoded LE1M/LE2M only",

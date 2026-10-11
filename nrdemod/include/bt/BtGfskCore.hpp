@@ -35,25 +35,29 @@
 
 namespace btdemod {
 
-enum Phy {
-  LE_1M = 1, // 1 Msym/s GFSK
-  LE_2M = 2  // 2 Msym/s GFSK
-};
+  enum Phy {
+    LE_1M = 1,   // 1 Msym/s GFSK
+    LE_2M = 2,   // 2 Msym/s GFSK
+    BDR_GFSK = 3 // classic Basic Rate, 1 Msym/s GFSK (Core Spec Vol 2 Part B 2.1), h ~ 0.3
+  };
 
-struct Config {
-  double   sampleRate;             // Hz, input IQ sample rate
-  int      phy;                    // Phy enum, selects the 1/2 Msym/s symbol rate
-  double   modulationIndex;        // nominal h, 0.5 for Bluetooth LE
-  bool     burstSearch;            // search for the burst in the capture
-  double   burstSearchThresholdDb; // power threshold below the peak, dB
-  // Access Address correlated against to declare "sync word found". Bluetooth Core Spec
-  // Vol 6 Part F (Direct Test Mode) fixes AA = 0x71764129 for test packets; override via
-  // Config when the capture used a different (e.g. randomized) connection Access Address.
-  uint32_t accessAddress;
-  double   syncThreshold; // minimum Access Address bit match rate (0..1) to declare sync
+  struct Config {
+    double sampleRate;             // Hz, input IQ sample rate
+    int phy;                       // Phy enum, selects the symbol rate (and sync scope for BDR_GFSK)
+    double modulationIndex;        // nominal h: 0.5 for Bluetooth LE, ~0.3 for classic BDR
+    bool burstSearch;              // search for the burst in the capture
+    double burstSearchThresholdDb; // power threshold below the peak, dB
+    // Access Address correlated against to declare "sync word found". Bluetooth Core Spec
+    // Vol 6 Part F (Direct Test Mode) fixes AA = 0x71764129 for test packets; override via
+    // Config when the capture used a different (e.g. randomized) connection Access Address.
+    // Not used for BDR_GFSK: classic Bluetooth's 64-bit sync word is derived from the 24-bit
+    // LAP via a dedicated generator procedure, not a literal bit pattern - deliberately left
+    // undecoded here rather than guessed at (same policy as the 802.11ad Golay sequence gap).
+    uint32_t accessAddress;
+    double syncThreshold; // minimum Access Address bit match rate (0..1) to declare sync
 
-  Config();
-};
+    Config();
+  };
 
 struct Result {
   bool        ok;

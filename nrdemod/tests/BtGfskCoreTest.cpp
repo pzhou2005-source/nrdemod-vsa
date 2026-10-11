@@ -201,6 +201,46 @@ void testLe2mAccessAddressRecovery()
   CHECK_NEAR(result.frequencyErrorHz, 50e3, 15e3);
 }
 
+// Classic BDR has no sync-word decode (see BtGfskCore.hpp Phy::BDR_GFSK comment) - only
+// burst detection and frequency-accuracy metrics are claimed, mirrored by this test.
+void testBdrBurstAndFrequencyMetrics()
+{
+  std::vector<int> bits;
+  for (int i = 0; i < 8; ++i) bits.push_back(i % 2); // alternating preamble, same shape as LE
+  unsigned payloadState = 54321u;
+  for (int i = 0; i < 200; ++i) {
+    payloadState = payloadState * 1103515245u + 12345u;
+    bits.push_back((payloadState >> 16) & 1);
+  }
+
+  const double sampleRate = 32e6;
+  std::vector<std::complex<double> > burst =
+      modulateGfsk(bits, BDR_GFSK, 0.3, sampleRate, /*frequencyErrorHz=*/20e3, /*noiseAmplitude=*/0.01, 7u);
+
+  std::vector<std::complex<double> > capture(burst.size() + 2000, std::complex<double>(0.0, 0.0));
+  unsigned noiseState = 5u;
+  auto noise = [&]() {
+    noiseState = noiseState * 1664525u + 1013904223u;
+    return (static_cast<double>(noiseState >> 8) / 16777216.0 - 0.5) * 0.001;
+  };
+  for (auto& sample : capture) sample = std::complex<double>(noise(), noise());
+  std::copy(burst.begin(), burst.end(), capture.begin() + 1000);
+
+  Config config;
+  config.sampleRate = sampleRate;
+  config.phy = BDR_GFSK;
+  config.modulationIndex = 0.3;
+  const Result result = demodulate(capture, config);
+
+  CHECK(result.ok);
+  CHECK(result.burstFound);
+  CHECK(!result.syncWordFound); // deliberately never claimed for BDR
+  CHECK(result.burstStart > 500);
+  CHECK(result.burstStart < 1500);
+  CHECK_NEAR(result.frequencyErrorHz, 20e3, 15e3);
+  CHECK(result.deltaFAvgHz > 0.0);
+}
+
 void testNoBurstWhenCaptureIsEmpty()
 {
   Config config;
@@ -241,6 +281,7 @@ int main()
 {
   testLe1mAccessAddressRecovery();
   testLe2mAccessAddressRecovery();
+  testBdrBurstAndFrequencyMetrics();
   testNoBurstWhenCaptureIsEmpty();
   testWrongAccessAddressFailsSync();
 

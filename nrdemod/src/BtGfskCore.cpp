@@ -211,19 +211,25 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
   }
   result.symbolTimingPhase = bestPhase;
 
-  const std::vector<int> bits =
-      symbolDecisions(freqHz, bestPhase, samplesPerSymbol, burstStart, burstStart + burstLength);
+  // Classic BDR's 64-bit sync word is derived from the 24-bit LAP via a dedicated generator
+  // procedure (Core Spec Vol 2 Part B 2.1), not a literal bit pattern like LE's Access Address -
+  // deliberately left undecoded (same policy as the still-unverified 802.11ad Golay sequence),
+  // so no sync claim is made for BDR_GFSK: burst detection and frequency metrics only.
+  if (config.phy != BDR_GFSK) {
+    const std::vector<int> bits =
+        symbolDecisions(freqHz, bestPhase, samplesPerSymbol, burstStart, burstStart + burstLength);
 
-  int accessAddressPosition = -1;
-  double accessAddressRho = 0.0;
-  std::vector<int> accessAddressBits;
-  correlateAccessAddress(bits, config.accessAddress, accessAddressPosition, accessAddressRho, accessAddressBits);
-  result.syncWordRho = accessAddressRho;
-  result.syncWordFound = accessAddressRho >= config.syncThreshold;
-  result.accessAddressBits = accessAddressBits;
-  if (accessAddressPosition >= 0) {
-    result.syncPositionSamples =
-        burstStart + bestPhase + static_cast<int>(std::llround(accessAddressPosition * samplesPerSymbol));
+    int accessAddressPosition = -1;
+    double accessAddressRho = 0.0;
+    std::vector<int> accessAddressBits;
+    correlateAccessAddress(bits, config.accessAddress, accessAddressPosition, accessAddressRho, accessAddressBits);
+    result.syncWordRho = accessAddressRho;
+    result.syncWordFound = accessAddressRho >= config.syncThreshold;
+    result.accessAddressBits = accessAddressBits;
+    if (accessAddressPosition >= 0) {
+      result.syncPositionSamples =
+          burstStart + bestPhase + static_cast<int>(std::llround(accessAddressPosition * samplesPerSymbol));
+    }
   }
 
   // Carrier frequency error: mean instantaneous frequency over the preamble, which by

@@ -944,8 +944,7 @@ void dft(std::vector<cd>& a, bool inverse)
     l = sCachedFb.size();
   } else {
     l = 1;
-    while (l < 2 * m - 1)
-      l <<= 1;
+    while (l < 2 * m - 1) l <<= 1;
     const double sign = inverse ? 1.0 : -1.0;
     sCachedW.assign(m, cd(0.0, 0.0));
     for (size_t n = 0; n < m; ++n) {
@@ -955,8 +954,7 @@ void dft(std::vector<cd>& a, bool inverse)
     sCachedFb.assign(l, cd(0.0, 0.0));
     for (size_t n = 0; n < m; ++n) {
       sCachedFb[n] = std::conj(sCachedW[n]);
-      if (n > 0)
-        sCachedFb[l - n] = std::conj(sCachedW[n]);
+      if (n > 0) sCachedFb[l - n] = std::conj(sCachedW[n]);
     }
     fft(sCachedFb, false);
     sCachedM = m;

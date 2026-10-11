@@ -13,12 +13,14 @@
 #
 # Pass --tdc-reference with the TDC waveform root (NR_DEMOD_REFERENCE_WAVEFORM_ROOT,
 # e.g. /home/pengzhou/demod/waveforms) to additionally bundle the raw .wfm+.para2
-# pairs for WiFi (802.11*), UWB (802.15.4z_HrpUwb), Bluetooth (Bluetooth*) and
-# NB-IoT (NbIot*) under captures/tdc_reference/<family>/. These standards have no
-# native nrdemod backend (legacy-only), so there is no .npy/.json export for them;
-# the .wfm plays back directly in the 89600 (Inputs.Recording.RecallFile detects
-# the Signal Studio format) against its own WiFi/BT/UWB/IoT personality, and the
-# paired .para2 documents the recorded reference metrics to compare against.
+# pairs for WiFi (802.11*), UWB (802.15.4z_HrpUwb), Bluetooth (Bluetooth*),
+# NB-IoT (NbIot*) and LTE/eMTC (Lte*, EmtcDl) under captures/tdc_reference/<family>/.
+# These standards have no native nrdemod backend other than LTE/eMTC itself
+# (which reuses the 5GNR CP-OFDM core in-tree, not exposed as a separate
+# standalone module here), so there is no .npy/.json export for them; the
+# .wfm plays back directly in the 89600 (Inputs.Recording.RecallFile detects
+# the Signal Studio format) against its own WiFi/BT/UWB/IoT/LTE personality,
+# and the paired .para2 documents the recorded reference metrics to compare against.
 #
 # Pass --tdc-reference-plaintext with the output directory of the in-tree
 # testDemod_ConvertTdcWaveformsToUnencryptedVsa89600 test (NR_DEMOD_REFERENCE_
@@ -90,7 +92,7 @@ fi
 
 if [[ -n "$tdcReference" ]]; then
   tdcCount=0
-  for family in "$tdcReference"/802.11* "$tdcReference"/802.15.4z_HrpUwb "$tdcReference"/Bluetooth* "$tdcReference"/NbIot*; do
+  for family in "$tdcReference"/802.11* "$tdcReference"/802.15.4z_HrpUwb "$tdcReference"/Bluetooth* "$tdcReference"/NbIot* "$tdcReference"/Lte* "$tdcReference"/EmtcDl; do
     [[ -d "$family" ]] || continue
     name="$(basename "$family")"
     destDir="$root/captures/tdc_reference/$name"
@@ -104,7 +106,7 @@ if [[ -n "$tdcReference" ]]; then
       tdcCount=$((tdcCount + 1))
     done
   done
-  echo "tdc reference: $tdcCount paired WiFi/UWB/Bluetooth/NbIot waveforms bundled under captures/tdc_reference"
+  echo "tdc reference: $tdcCount paired WiFi/UWB/Bluetooth/NbIot/Lte/Emtc waveforms bundled under captures/tdc_reference"
 fi
 
 if [[ -n "$tdcReferencePlaintext" ]]; then
