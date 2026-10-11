@@ -46,6 +46,22 @@
       "command": "${command:python.interpreterPath}",
       "args": ["${workspaceFolder}/tools/correlate.py", "selftest"],
       "problemMatcher": []
+    },
+    {
+      "label": "6. Generate MATLAB waveforms (captures/generated)",
+      "type": "shell",
+      "command": "matlab",
+      "args": ["-batch", "generate_all_waveforms"],
+      "options": { "cwd": "${workspaceFolder}/tools" },
+      "problemMatcher": []
+    },
+    {
+      "label": "7. Generate waveforms with Octave (sparklink)",
+      "type": "shell",
+      "command": "octave-cli",
+      "args": ["--eval", "generate_all_waveforms([], {'sparklink'})"],
+      "options": { "cwd": "${workspaceFolder}/tools" },
+      "problemMatcher": []
     }
   ],
   "inputs": [
