@@ -57,6 +57,19 @@ def main():
         sampleRate=245.76e6,
         modulation=nrdemod.QAM16,
     )
+    ok &= run(
+        "NB-IoT 1RB mu=0 QPSK",
+        numerology=0,
+        frequencyRange=nrdemod.FR1,
+        channelBandwidthMHz=0,
+        numResourceBlocks=1,
+        resourceBlockOffset=0,
+        transformPrecoding=False,
+        resample=True,
+        burstSearch=False,
+        sampleRate=1.92e6,
+        modulation=nrdemod.QPSK,
+    )
     print("\nPASS" if ok else "\nFAIL")
     return 0 if ok else 1
 

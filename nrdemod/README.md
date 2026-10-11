@@ -15,7 +15,13 @@ Two independent shared libraries are built:
   LTE/eMTC downlink+uplink reuse this same CP-OFDM/SC-FDMA core with an
   explicit `numResourceBlocks` (see the in-tree `lte/LteDemodulation.cpp` for
   the exact config this maps to); there is no separate standalone LTE module
-  since the core itself already covers it.
+  since the core itself already covers it. NB-IoT downlink+uplink reuse it the
+  same way — 15 kHz SCS, numerology 0, a single resource block
+  (`numResourceBlocks=1`, `resourceBlockOffset=0`) and no transform precoding
+  for the single-tone captures this core supports (see the in-tree
+  `nbiot/NbIotDemodulation.cpp` for the exact config, including
+  `ssbSearch=False`, a no-op here); again no separate standalone NB-IoT module
+  exists or is needed.
 - `demod` — WiFi (802.11a/b/n/ac/ax/ad/be), Bluetooth (LE1M/LE2M GFSK with full
   sync-word decode; classic BDR, classic EDR's leading GFSK access-code+header,
   and LE Coded S=8 - all three burst/frequency-metrics only) and UWB
@@ -107,6 +113,29 @@ attributes, vectors as numpy arrays (`constellation`, `reference`,
 `evmPerSubcarrier`, `evmPerSlot`, `evmPerResourceBlock`,
 `channelImpulseResponseDb`, ...). `res.as_dict(include_vectors=True)` dumps
 them all.
+
+NB-IoT downlink/uplink (single-tone NPUSCH) use the same `nrdemod` module and
+core, just with the config the in-tree `nbiot/NbIotDemodulation.cpp` adapter
+builds — 15 kHz SCS (numerology 0) and a single resource block. The in-tree
+adapter also sets `ssbSearch=False` (NB-IoT has no 5GNR-style PSS/SSB), but
+that field isn't exposed through this standalone C ABI; it is a no-op anyway
+for a 1-RB/12-subcarrier grid since the SSB correlation only ever runs when
+`numSc >= 240`:
+
+```python
+nbiot_cfg = nrdemod.Config(
+    numerology=0,
+    frequencyRange=nrdemod.FR1,
+    channelBandwidthMHz=0,              # unknown/not applicable for NB-IoT
+    numResourceBlocks=1,
+    resourceBlockOffset=0,
+    transformPrecoding=False,           # single-tone NPUSCH only; multi-tone
+                                         # DFT-s-OFDM would need True, like NR PUSCH
+    resample=True,
+    sampleRate=1.92e6,
+)
+res = nrdemod.demodulate(iq, nbiot_cfg)
+```
 
 ### WiFi / Bluetooth LE / UWB
 
