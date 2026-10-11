@@ -16,9 +16,10 @@ Two independent shared libraries are built:
   explicit `numResourceBlocks` (see the in-tree `lte/LteDemodulation.cpp` for
   the exact config this maps to); there is no separate standalone LTE module
   since the core itself already covers it.
-- `demod` — WiFi (802.11a/b/n/ac/ax/ad/be), Bluetooth (LE1M/LE2M GFSK, classic
-  BDR GFSK burst/frequency-metrics only) and UWB (802.15.4z HRP)
-  (`demod_c.h`, module `nrdemod.demod`).
+- `demod` — WiFi (802.11a/b/n/ac/ax/ad/be), Bluetooth (LE1M/LE2M GFSK with full
+  sync-word decode; classic BDR, classic EDR's leading GFSK access-code+header,
+  and LE Coded S=8 - all three burst/frequency-metrics only) and UWB
+  (802.15.4z HRP) (`demod_c.h`, module `nrdemod.demod`).
 
 ```
 include/nr/NrOfdmCore.hpp        5G NR DSP core header      (synced from the bazel tree)
@@ -30,7 +31,7 @@ include/wifi11ax/...             802.11ax (HE)              (synced from the baz
 include/wifi11ad/...             802.11ad (DMG/WiGig)       (synced from the bazel tree)
 include/wifi11b/...              802.11b (DSSS/CCK)         (synced from the bazel tree)
 include/wifi11be/...             802.11be (EHT)             (synced from the bazel tree)
-include/bt/BtGfskCore.hpp        Bluetooth LE1M/LE2M + BDR GFSK (synced from the bazel tree)
+include/bt/BtGfskCore.hpp        Bluetooth LE1M/LE2M + BDR/EDR/LE-Coded GFSK (synced from the bazel tree)
 include/uwb/UwbHrpCore.hpp       802.15.4z HRP-UWB          (synced from the bazel tree)
 include/nrdemod/demod_c.h        WiFi/BT/UWB flat C ABI
 src/NrOfdmCore.cpp               5G NR DSP core             (synced from the bazel tree)
@@ -130,6 +131,16 @@ print(res_bt.syncWordFound, res_bt.deltaFAvgHz)
 # syncWordFound is always False (the LAP-derived sync word is not decoded).
 bdr_cfg = demod.Config(sampleRate=32e6, phy=3, modulationIndex=0.3)
 res_bdr = demod.demodulate(demod.BT_LE, iq, bdr_cfg)
+
+# phy=4 selects classic EDR (burst/frequency metrics over the packet's leading
+# GFSK access-code+header only, 126 symbols @ 1 Msym/s - the pi/4-DQPSK/8-DPSK
+# payload that follows is not demodulated). phy=5 selects LE Coded S=8, which
+# is physically still 1 Msym/s GFSK on air (same code path as LE1M, just FEC
+# pattern-mapped bits) - both have syncWordFound always False.
+edr_cfg = demod.Config(sampleRate=10e6, phy=4, modulationIndex=0.3)
+res_edr = demod.demodulate(demod.BT_LE, iq, edr_cfg)
+le_coded_cfg = demod.Config(sampleRate=10e6, phy=5)
+res_le_coded = demod.demodulate(demod.BT_LE, iq, le_coded_cfg)
 
 uwb_cfg = demod.Config(sampleRate=999.36e6)
 res_uwb = demod.demodulate(demod.UWB_HRP, iq, uwb_cfg)

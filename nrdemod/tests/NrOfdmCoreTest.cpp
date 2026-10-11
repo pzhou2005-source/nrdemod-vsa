@@ -143,6 +143,48 @@ void testCarrierTable()
   CHECK(pos.size() == 2 && pos[0] == 0 && pos[1] == 10);
 }
 
+// TS 38.211 6.4.1.1 real Gold-sequence DM-RS: generateTestSignal() injects the exact reference
+// (see pushDmrsReferenceSymbol) whenever scramblingId is set, so a noise free loopback with the
+// correct identity/slot must decode DmrsEvm near 0; a wrong identity or slot number must not.
+void testDmrsSequenceDecode()
+{
+  Config cfg;
+  cfg.numerology = 1;
+  cfg.fftSize = 512;
+  cfg.sampleRate = 15360000.0;
+  cfg.modulation = MOD_QAM64;
+  cfg.numResourceBlocks = 20;
+  cfg.maxSymbols = 14;
+  cfg.dmrs.scramblingId = 123;
+  cfg.dmrs.nSCID = 1;
+  cfg.dmrs.startSlotNumber = 7;
+
+  const std::vector<std::complex<float>> waveform = generateTestSignal(cfg, 14, 0, 777, NULL);
+  const Result correct = demodulate(waveform.data(), waveform.size(), cfg);
+  CHECK(correct.ok);
+  CHECK(!correct.dmrsSymbols.empty());
+  CHECK(correct.dmrsEvmPercent < 1.0); // exact Gold sequence reference: only equalizer convergence residual
+  CHECK_NEAR(correct.dmrsPowerDb, 0.0, 0.5);
+
+  Config wrongId = cfg;
+  wrongId.dmrs.scramblingId = 456; // same slot/symbol, different Gold sequence identity
+  const Result badId = demodulate(waveform.data(), waveform.size(), wrongId);
+  CHECK(badId.ok);
+  CHECK(badId.dmrsEvmPercent > 50.0); // uncorrelated reference: EVM close to 100 %, not 0
+
+  Config wrongSlot = cfg;
+  wrongSlot.dmrs.startSlotNumber = 8; // same identity, wrong absolute slot number
+  const Result badSlot = demodulate(waveform.data(), waveform.size(), wrongSlot);
+  CHECK(badSlot.ok);
+  CHECK(badSlot.dmrsEvmPercent > 50.0);
+
+  Config unknownId = cfg;
+  unknownId.dmrs.scramblingId = -1; // identity unknown: falls back to the blind estimator
+  const Result blind = demodulate(waveform.data(), waveform.size(), unknownId);
+  CHECK(blind.ok);
+  CHECK(blind.dmrsEvmPercent < 1.0); // blind estimate also recognises this clean DM-RS
+}
+
 void testHardDecision()
 {
   const std::complex<double> q = hardDecision(std::complex<double>(0.6, -0.9), MOD_QPSK);
@@ -560,6 +602,7 @@ int main()
   testDftArbitraryLength();
   testResamplerTone();
   testCarrierTable();
+  testDmrsSequenceDecode();
   testHardDecision();
   testCpPhaseAcquisition();
   testMixedSsbData();

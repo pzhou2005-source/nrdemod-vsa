@@ -25,6 +25,14 @@ double symbolRateHz(int phy)
   return phy == LE_2M ? 2.0e6 : 1.0e6;
 }
 
+// Classic EDR packet's leading GFSK portion (Access Code + Header, Core Spec Vol 2 Part B
+// 2.1/6.5) is always 72 + 54 = 126 symbols at 1 Msym/s regardless of packet type (1DHx/2DHx/
+// 3DHx/...) - verified against all 6 real TDC EDR captures (2DH1/3/5, 3DH1/3/5): the IQ
+// envelope magnitude is bit-exact constant (std ~0.0) for exactly the first 126 symbols, then
+// jumps to the pi/4-DQPSK/8-DPSK payload's non-constant envelope. Measuring frequency/F0 only
+// over this fixed, protocol-guaranteed window avoids needing to decode the EDR payload itself.
+const int EDR_GFSK_HEADER_SYMBOLS = 126;
+
 // Windowed average power, one value per sample (edge-padded), used for burst start/end search.
 std::vector<double> windowedPowerDb(const std::vector<std::complex<double> >& iq, int window)
 {
@@ -214,8 +222,10 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
   // Classic BDR's 64-bit sync word is derived from the 24-bit LAP via a dedicated generator
   // procedure (Core Spec Vol 2 Part B 2.1), not a literal bit pattern like LE's Access Address -
   // deliberately left undecoded (same policy as the still-unverified 802.11ad Golay sequence),
-  // so no sync claim is made for BDR_GFSK: burst detection and frequency metrics only.
-  if (config.phy != BDR_GFSK) {
+  // so no sync claim is made for BDR_GFSK/EDR_GFSK_HEADER: burst detection and frequency
+  // metrics only. LE_CODED_S8's on-air Access Address bits are FEC pattern-mapped (coded), not
+  // the literal value correlated for LE1M/LE2M, so no sync claim is made there either.
+  if (config.phy != BDR_GFSK && config.phy != EDR_GFSK_HEADER && config.phy != LE_CODED_S8) {
     const std::vector<int> bits =
         symbolDecisions(freqHz, bestPhase, samplesPerSymbol, burstStart, burstStart + burstLength);
 
@@ -276,18 +286,26 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
   }
   result.frequencyErrorHz = freqCount > 0 ? freqSum / freqCount : 0.0;
 
-  // Frequency deviation statistics over the full burst, carrier offset removed (DeltaFAvg/
-  // Max/Min, the modulation-accuracy quantities a VSA reports for GFSK).
+  // Frequency deviation statistics, carrier offset removed (DeltaFAvg/Max/Min, the
+  // modulation-accuracy quantities a VSA reports for GFSK). EDR_GFSK_HEADER bounds the
+  // measurement to the packet's leading Access Code + Header (72 + 54 = 126 symbols, Core Spec
+  // Vol 2 Part B 2.1/6.5) - the only part of an EDR packet that is actually GFSK, confirmed
+  // against real captures (IQ envelope magnitude is bit-exact constant for exactly this many
+  // symbols, then jumps to the pi/4-DQPSK/8-DPSK payload). Every other Phy measures the whole
+  // burst, which is GFSK throughout.
+  const int deltaFLength = config.phy == EDR_GFSK_HEADER
+      ? std::min(burstLength, static_cast<int>(std::llround(EDR_GFSK_HEADER_SYMBOLS * samplesPerSymbol)))
+      : burstLength;
   double devSum = 0.0, devMax = -1e300, devMin = 1e300;
-  for (int i = burstStart; i < burstStart + burstLength; ++i) {
+  for (int i = burstStart; i < burstStart + deltaFLength; ++i) {
     const double deviation = std::fabs(freqHz[i] - result.frequencyErrorHz);
     devSum += deviation;
     devMax = std::max(devMax, deviation);
     devMin = std::min(devMin, deviation);
   }
-  result.deltaFAvgHz = burstLength > 0 ? devSum / burstLength : 0.0;
-  result.deltaFMaxHz = burstLength > 0 ? devMax : 0.0;
-  result.deltaFMinHz = burstLength > 0 ? devMin : 0.0;
+  result.deltaFAvgHz = deltaFLength > 0 ? devSum / deltaFLength : 0.0;
+  result.deltaFMaxHz = deltaFLength > 0 ? devMax : 0.0;
+  result.deltaFMinHz = deltaFLength > 0 ? devMin : 0.0;
 
   result.ok = true;
   return result;

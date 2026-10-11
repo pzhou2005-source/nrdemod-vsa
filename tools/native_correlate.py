@@ -43,12 +43,10 @@ NO_NATIVE = {
     "LteFddUl": "no verified 89600 LTE personality mapping (see legacy_correlate.py)",
     "LteTddUl": "no verified 89600 LTE personality mapping (see legacy_correlate.py)",
     "EmtcDl": "no verified 89600 LTE personality mapping (see legacy_correlate.py)",
-    "BluetoothBdr": "native BT core is LE only (no BR GFSK)",
-    "BluetoothEdr": "native BT core is LE only (no EDR DPSK)",
-    "BluetoothLeCodedS8": "native BT core handles uncoded LE1M/LE2M only",
 }
 FAMILY_ID = {"802.11a": demod.WIFI_A, "802.11b": demod.WIFI_B, "802.11n": demod.WIFI_N, "802.11ac": demod.WIFI_AC,
-             "BluetoothLe1M": demod.BT_LE, "BluetoothLe2M": demod.BT_LE, "802.15.4z_HrpUwb": demod.UWB_HRP}
+             "BluetoothLe1M": demod.BT_LE, "BluetoothLe2M": demod.BT_LE, "BluetoothBdr": demod.BT_LE,
+             "BluetoothEdr": demod.BT_LE, "BluetoothLeCodedS8": demod.BT_LE, "802.15.4z_HrpUwb": demod.UWB_HRP}
 
 
 def _vsa_rows() -> dict:
@@ -135,8 +133,10 @@ def correlate_one(family, stem, wav, vsa) -> dict:
                 ok = ok and abs(row["delta_freq_hz"]) <= FREQ_TOL_HZ
             row["vsa_FreqErr"] = vsa_freq
             row["pass"] = bool(ok)
-    elif family.startswith("BluetoothLe"):
-        phy = 2 if family.endswith("2M") else 1
+    elif family.startswith("BluetoothLe") or family in ("BluetoothBdr", "BluetoothEdr"):
+        # phy: 1=LE1M, 2=LE2M, 3=BDR, 4=EDR (GFSK header only), 5=LE Coded S=8 - see BtGfskCore.hpp Phy enum.
+        phy = 2 if family.endswith("2M") else 3 if family == "BluetoothBdr" else 4 if family == "BluetoothEdr" \
+            else 5 if family == "BluetoothLeCodedS8" else 1
         res, d = _run(fid, iq, fs, phy=phy)
         vec = res.frequencyDeviationHz
         k = max(int(d.get("samplesPerSymbol", 10) / 4), 1)
@@ -146,7 +146,13 @@ def correlate_one(family, stem, wav, vsa) -> dict:
         row.update(native_dev_hz=dev, vsa_dev_hz=vsa_dev, native_deltaFAvg_hz=d.get("deltaFAvgHz"),
                    native_FreqErr=d.get("frequencyErrorHz"), vsa_FreqErr=vall.get("FskCarrOffs"),
                    native_info=f"syncWord={d.get('syncWordFound')} rho={d.get('syncWordRho')}")
-        if dev is not None and vsa_dev:
+        if phy in (3, 4, 5):
+            # BDR/EDR/LE Coded are burst+frequency-metrics only (see BtGfskCore.hpp) - no sync-word claim.
+            if dev is not None and vsa_dev:
+                row["delta_dev_pct"] = (dev / vsa_dev - 1) * 100
+                row["pass"] = bool(abs(row["delta_dev_pct"]) <= DEV_TOL_PCT and d.get("burstFound")
+                                   and abs(d.get("frequencyErrorHz", 0) - (vall.get("FskCarrOffs") or 0)) <= BT_FREQ_TOL_HZ)
+        elif dev is not None and vsa_dev:
             row["delta_dev_pct"] = (dev / vsa_dev - 1) * 100
             row["pass"] = bool(abs(row["delta_dev_pct"]) <= DEV_TOL_PCT and d.get("syncWordFound")
                                and abs(d.get("frequencyErrorHz", 0) - (vall.get("FskCarrOffs") or 0)) <= BT_FREQ_TOL_HZ)

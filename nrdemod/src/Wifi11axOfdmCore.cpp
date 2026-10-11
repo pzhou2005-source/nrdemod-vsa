@@ -153,7 +153,7 @@ std::vector<double> designLowpassFir(int numTaps, double cutoffRatio)
 }
 
 std::vector<cd> channelizeFir(const std::vector<cd>& iq, double sampleRate, double offsetHz, double outRate,
-                               int maxOutLen = -1)
+    int maxOutLen = -1)
 {
   const int numTaps = 127;
   const double cutoffRatio = (outRate / 2.0) / sampleRate;
@@ -274,8 +274,7 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
         const double offsetHz = static_cast<double>(k) * stepHz;
         const int neededLen = probeStart + probeWindow + 2 * FFT_SIZE;
         const std::vector<cd> channelized = channelizeFir(iq, config.sampleRate, offsetHz, 20.0e6, neededLen);
-        const int probeEnd =
-            std::min(static_cast<int>(channelized.size()) - 2 * FFT_SIZE, probeStart + probeWindow);
+        const int probeEnd = std::min(static_cast<int>(channelized.size()) - 2 * FFT_SIZE, probeStart + probeWindow);
         for (int pos = probeStart; pos < probeEnd; ++pos) {
           const double score = matchedFilterScore(channelized, pos, ltfTimeProbe) +
                                 matchedFilterScore(channelized, pos + FFT_SIZE, ltfTimeProbe);
