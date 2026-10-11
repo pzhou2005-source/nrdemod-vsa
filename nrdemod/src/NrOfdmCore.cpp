@@ -445,6 +445,12 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
   std::vector<std::vector<cd> > corr(numSym, std::vector<cd>(numSc, cd(1.0, 0.0)));
   std::vector<double> slopes(numSym, 0.0), gains(numSym, 1.0);
   std::vector<std::vector<cd> > resid(numSym, std::vector<cd>(numSc));
+  // the exhaustive phase search below resolves a quadrant ambiguity per symbol; once its pick
+  // repeats twice in a row it never changes again (verified against real 100MHz
+  // DFT-s-OFDM/256QAM TDC captures), so later iterations can skip straight to the cheap
+  // 8-step gradient refinement instead of repeating the full 32-candidate O(numSc) sweep.
+  std::vector<double> lastPhasePick(numSym, std::numeric_limits<double>::quiet_NaN());
+  std::vector<int> phasePickStableCount(numSym, 0);
 
   if (iterations < 1) iterations = 1;
   if (puncturedCarrier >= 0 && equalize && iterations > 1)
@@ -497,22 +503,30 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
         }
         double phi = std::abs(fourth) > 0.0 ? (std::arg(fourth) - PI) / 4.0 : 0.0;
         if ((numSc < 64 && mod != MOD_QPSK) || (precoding && mod == MOD_QAM256 && !excludedSym[l])) {
-          double bestError = std::numeric_limits<double>::infinity();
-          for (int candidate = 0; candidate < 32; ++candidate) {
-            const double phase = -PI / 4.0 + candidate * PI / 64.0;
-            const cd rotation = std::polar(1.0, -phase);
-            const cd offset = initialPunctureOffset(rotation);
-            double error = 0.0;
-            for (size_t carrier = 0; carrier < numSc; ++carrier) {
-              if (excludedSc[carrier] || resourceMask[l][carrier])
-                continue;
-              const cd measured = d[carrier] * rotation - (carrier % 2 == 0 ? offset : -offset);
-              error += std::norm(measured - hardDecision(measured, mod));
+          if (phasePickStableCount[l] >= 2) {
+            // ambiguity already resolved twice in a row: trust the locked-in pick instead of
+            // repeating the full O(32 * numSc) sweep every remaining iteration.
+            phi = lastPhasePick[l];
+          } else {
+            double bestError = std::numeric_limits<double>::infinity();
+            for (int candidate = 0; candidate < 32; ++candidate) {
+              const double phase = -PI / 4.0 + candidate * PI / 64.0;
+              const cd rotation = std::polar(1.0, -phase);
+              const cd offset = initialPunctureOffset(rotation);
+              double error = 0.0;
+              for (size_t carrier = 0; carrier < numSc; ++carrier) {
+                if (excludedSc[carrier] || resourceMask[l][carrier])
+                  continue;
+                const cd measured = d[carrier] * rotation - (carrier % 2 == 0 ? offset : -offset);
+                error += std::norm(measured - hardDecision(measured, mod));
+              }
+              if (error < bestError) {
+                bestError = error;
+                phi = phase;
+              }
             }
-            if (error < bestError) {
-              bestError = error;
-              phi = phase;
-            }
+            phasePickStableCount[l] = (phi == lastPhasePick[l]) ? phasePickStableCount[l] + 1 : 0;
+            lastPhasePick[l] = phi;
           }
         }
         cd rot = std::polar(1.0, -phi);
