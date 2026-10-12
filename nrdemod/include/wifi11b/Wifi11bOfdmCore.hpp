@@ -25,6 +25,9 @@
  *      (absorbs the unknown channel gain and the differentially-encoded
  *      phi1 rotation together - see Wifi11bOfdmCore.cpp for the
  *      cross-verification against real TDC captures).
+ *   5. optional 1/2 Mb/s Barker DATA EVM at an explicitly supplied symbol
+ *      offset/count, using SYNC gain/CFO/phase calibration and DBPSK/DQPSK
+ *      decisions; no DATA waveform fit is used for training.
  *
  * Scope limit: the actual payload bits (phi2/phi3/phi4 -> dibits -> octets)
  * are not decoded/descrambled - only EVM/sync accuracy is measured, the
@@ -47,6 +50,10 @@ struct Config {
   bool   burstSearch;            // search for the burst in the capture
   double burstSearchThresholdDb; // power threshold below the peak, dB
   double syncThreshold;          // minimum Barker correlation confidence (0..1) to declare sync
+  bool measureBarkerData;
+  bool barkerDataDqpsk;
+  int barkerDataSymbolOffset;
+  int barkerDataSymbolCount;
 
   Config();
 };
@@ -70,9 +77,10 @@ struct Result {
   int    numSyncSymbolsMeasured;
 
   bool   isCckDataRate;        // true if the DATA field's own Barker correlation is weak (5.5/11 Mb/s CCK)
-  double dataRmsEvmPercent;    // RMS EVM over the CCK DATA field (best-fit residual), as a percentage
+  double dataRmsEvmPercent;    // RMS DATA EVM: CCK residual or explicit Barker DATA, in percent
   double dataPeakEvmPercent;
   int    numDataSymbolsMeasured;
+  std::string dataError;
 
   Result();
 };

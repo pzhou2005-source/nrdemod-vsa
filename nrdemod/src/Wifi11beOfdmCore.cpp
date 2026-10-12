@@ -225,21 +225,171 @@ std::vector<cd> channelizeFir(const std::vector<cd>& iq, double sampleRate, doub
 
 }
 
-
-Config::Config() : sampleRate(0.0), burstSearch(true), burstSearchThresholdDb(15.0), syncThreshold(0.5)
+Config::Config()
+    : sampleRate(0.0), burstSearch(true), burstSearchThresholdDb(15.0), syncThreshold(0.5), measureDataEvm(false),
+      dataBandwidthMHz(20), numSpatialStreams(1), ehtLtfType(4), dataMcs(0), ehtLtfFftOffsetSamples(-1),
+      dataFftOffsetSamples(-1), dataGuardIntervalSamples(16), numDataSymbols(0)
 {
 }
 
 Result::Result()
     : ok(false), burstFound(false), burstStart(0), burstLength(0), syncFound(false), syncRho(0.0),
-      timingOffsetSamples(0), frequencyErrorHz(0.0)
+      timingOffsetSamples(0), frequencyErrorHz(0.0), dataEvmValid(false), evmRmsData(0.0), numDataSymbols(0)
 {
+}
+
+namespace
+{
+
+  bool dataPilot(int tone)
+  {
+    const int absoluteTone = std::abs(tone);
+    return absoluteTone == 22 || absoluteTone == 48 || absoluteTone == 90 || absoluteTone == 116;
+  }
+
+  cd dataDecision(cd value, int bits)
+  {
+    if (bits == 1)
+      return cd(value.real() < 0.0 ? -1.0 : 1.0, 0.0);
+    const int levels = 1 << (bits / 2);
+    const double scale = std::sqrt(2.0 * (levels * levels - 1) / 3.0);
+    const double realIndex = std::round((value.real() * scale + levels - 1) / 2.0);
+    const double imagIndex = std::round((value.imag() * scale + levels - 1) / 2.0);
+    return cd(2.0 * std::max(0.0, std::min(double(levels - 1), realIndex)) - levels + 1,
+               2.0 * std::max(0.0, std::min(double(levels - 1), imagIndex)) - levels + 1) /
+           scale;
+  }
+
+  bool dataFft(const std::vector<cd>& iq, double sourceStart, int fftOffset, const Config& config,
+      double frequencyErrorHz, std::vector<cd>& spectrum)
+  {
+    const double ratio = config.sampleRate / 20.0e6;
+    const double start = sourceStart + fftOffset * ratio;
+    if (start < 0.0 || start + 255 * ratio > double(iq.size() - 1))
+      return false;
+    spectrum.assign(256, cd(0.0, 0.0));
+    for (int sample = 0; sample < 256; ++sample) {
+      const double position = start + sample * ratio;
+      const int nearest = static_cast<int>(std::llround(position));
+      cd value(0.0, 0.0);
+      if (std::fabs(position - nearest) < 1e-8) {
+        value = iq[nearest];
+      } else {
+        const int center = static_cast<int>(std::floor(position));
+        double weightSum = 0.0;
+        for (int tap = center - 32; tap <= center + 32; ++tap) {
+          if (tap < 0 || tap >= static_cast<int>(iq.size()))
+            continue;
+          const double distance = position - tap;
+          const double weight =
+              std::sin(PI * distance) / (PI * distance) * (0.54 + 0.46 * std::cos(PI * distance / 33.0));
+          value += iq[tap] * weight;
+          weightSum += weight;
+        }
+        value /= weightSum;
+      }
+      spectrum[sample] = value * std::polar(1.0, -TWO_PI * frequencyErrorHz * position / config.sampleRate);
+    }
+    fft64(spectrum, false);
+    return true;
+  }
+
+  void measureData(const std::vector<cd>& iq, double sourceStart, const Config& config, Result& result)
+  {
+    const int bitsByMcs[] = {1, 2, 2, 4, 4, 6, 6, 6, 8, 8, 10, 10, 12, 12};
+    if (!result.syncFound || config.dataBandwidthMHz != 20 || config.numSpatialStreams != 1 || config.ehtLtfType != 4 ||
+        config.dataMcs < 0 || config.dataMcs > 13 || config.ehtLtfFftOffsetSamples < 0 || config.numDataSymbols <= 0 ||
+        config.dataFftOffsetSamples < static_cast<long long>(config.ehtLtfFftOffsetSamples) + 256 ||
+        (config.dataGuardIntervalSamples != 16 && config.dataGuardIntervalSamples != 32 &&
+            config.dataGuardIntervalSamples != 64)) {
+      result.dataError = "DATA EVM requires a synchronized 20 MHz single-stream RU242 packet, 4x EHT-LTF, MCS0-13 and "
+                         "explicit FFT offsets/GI/symbol count";
+      return;
+    }
+    std::vector<cd> training;
+    if (!dataFft(iq, sourceStart, config.ehtLtfFftOffsetSamples, config, result.frequencyErrorHz, training)) {
+      result.dataError = "incomplete EHT-LTF";
+      return;
+    }
+    double trainingPower = 0.0;
+    for (int tone = -122; tone <= 122; ++tone) {
+      if (std::abs(tone) >= 2)
+        trainingPower += std::norm(training[(tone + 256) % 256]);
+    }
+    if (!std::isfinite(trainingPower) || trainingPower <= 0.0) {
+      result.dataError = "invalid EHT-LTF channel estimate";
+      return;
+    }
+    double errorPower = 0.0, referencePower = 0.0;
+    for (int symbol = 0; symbol < config.numDataSymbols; ++symbol) {
+      std::vector<cd> spectrum;
+      const long long offset =
+          config.dataFftOffsetSamples + static_cast<long long>(symbol) * (256 + config.dataGuardIntervalSamples);
+      if (offset > 2147483647 ||
+          !dataFft(iq, sourceStart, static_cast<int>(offset), config, result.frequencyErrorHz, spectrum)) {
+        result.dataError = "incomplete DATA field";
+        return;
+      }
+      cd pilotPhase(0.0, 0.0);
+      for (int tone = -122; tone <= 122; ++tone) {
+        if (std::abs(tone) < 2)
+          continue;
+        const int index = (tone + 256) % 256;
+        if (std::norm(training[index]) <= trainingPower * 1e-12) {
+          result.dataError = "missing RU242 training tone";
+          return;
+        }
+        spectrum[index] /= training[index];
+        if (!std::isfinite(spectrum[index].real()) || !std::isfinite(spectrum[index].imag())) {
+          result.dataError = "non-finite equalized DATA";
+          return;
+        }
+        if (dataPilot(tone) && std::norm(spectrum[index]) > 0.0)
+          pilotPhase += spectrum[index] * spectrum[index] / std::norm(spectrum[index]);
+      }
+      if (std::abs(pilotPhase) <= 1e-12) {
+        result.dataError = "invalid DATA pilot phase";
+        return;
+      }
+      const cd phaseCorrection = std::polar(1.0, -std::arg(pilotPhase) / 2.0);
+      for (int tone = -122; tone <= 122; ++tone) {
+        if (std::abs(tone) < 2 || dataPilot(tone))
+          continue;
+        const cd value = spectrum[(tone + 256) % 256] * phaseCorrection;
+        const cd reference = dataDecision(value, bitsByMcs[config.dataMcs]);
+        errorPower += std::norm(value - reference);
+        referencePower += std::norm(reference);
+      }
+    }
+    if (!std::isfinite(errorPower) || !std::isfinite(referencePower) || referencePower <= 0.0) {
+      result.dataError = "non-finite DATA EVM";
+      return;
+    }
+    result.evmRmsData = std::sqrt(errorPower / referencePower);
+    result.numDataSymbols = config.numDataSymbols;
+    result.dataEvmValid = true;
+  }
+
+}
+
+void measureDataEvm(const std::vector<cd>& iq, double ppduStartSamples, const Config& config, Result& result)
+{
+  result.dataEvmValid = false;
+  result.dataError.clear();
+  result.evmRmsData = 0.0;
+  result.numDataSymbols = 0;
+  if (iq.empty() || !std::isfinite(config.sampleRate) || config.sampleRate < 20.0e6 ||
+      !std::isfinite(ppduStartSamples) || ppduStartSamples < 0.0) {
+    result.dataError = "invalid DATA capture, sample rate or PPDU start";
+    return;
+  }
+  measureData(iq, ppduStartSamples, config, result);
 }
 
 Result demodulate(const std::vector<cd>& iq, const Config& config)
 {
   Result result;
-  if (iq.empty() || config.sampleRate <= 0.0) {
+  if (iq.empty() || !std::isfinite(config.sampleRate) || config.sampleRate <= 0.0) {
     result.error = "empty capture or invalid sample rate";
     return result;
   }
@@ -365,6 +515,8 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
   result.frequencyErrorHz = residualPhase * (20.0e6) / (TWO_PI * FFT_SIZE);
 
   result.ok = true;
+  if (config.measureDataEvm)
+    measureDataEvm(iq, (bestPos - 192) * samplesPerFftSample, config, result);
   return result;
 }
 

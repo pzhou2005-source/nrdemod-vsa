@@ -14,6 +14,8 @@
 
 #include "wifi11be/Wifi11beOfdmCore.hpp"
 
+#include "wifi11ax/Wifi11axOfdmCore.hpp"
+
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -183,13 +185,124 @@ void testNoiseRejection()
   CHECK(!result.syncFound);
 }
 
+void testDataEvm()
+{
+  const int bitsByMcs[] = {1, 2, 2, 4, 4, 6, 6, 6, 8, 8, 10, 10, 12, 12};
+  for (int mcs = 0; mcs < 14; ++mcs) {
+    for (double noise : {0.0, 0.001}) {
+      std::vector<cd> packet = buildBePreamble(0.0, 20.0e6, 0.0, 12345u);
+      packet.resize(800, cd(0.0, 0.0));
+      const int bits = bitsByMcs[mcs];
+      const int levels = bits == 1 ? 2 : 1 << (bits / 2);
+      const double scale = bits == 1 ? 1.0 : std::sqrt(2.0 * (levels * levels - 1) / 3.0);
+      double errorPower = 0.0, referencePower = 0.0;
+      for (int symbol = -1; symbol < 3; ++symbol) {
+        std::vector<cd> spectrum(256, cd(0.0, 0.0));
+        for (int tone = -122; tone <= 122; ++tone) {
+          if (std::abs(tone) < 2)
+            continue;
+          const int index = (tone + 256) % 256;
+          const bool pilot =
+              std::abs(tone) == 22 || std::abs(tone) == 48 || std::abs(tone) == 90 || std::abs(tone) == 116;
+          const cd channel = std::polar(0.7 + 0.002 * (tone + 122), 0.003 * tone);
+          if (symbol < 0) {
+            spectrum[index] = channel * (index % 2 ? -1.0 : 1.0);
+          } else {
+            const cd reference = pilot ? cd(1.0, 0.0)
+                                       : cd(2 * ((index + symbol) % levels) - levels + 1,
+                                             bits == 1 ? 0 : 2 * ((index * 3 + symbol) % levels) - levels + 1) /
+                                             scale;
+            const cd perturbation = pilot ? cd(0.0, 0.0) : cd(noise, -noise);
+            spectrum[index] = (reference + perturbation) * channel * std::polar(1.0, 0.1 * (symbol + 1));
+            if (!pilot) {
+              errorPower += std::norm(perturbation);
+              referencePower += std::norm(reference);
+            }
+          }
+        }
+        fft64(spectrum, true);
+        for (auto& value : spectrum)
+          value /= 256.0;
+        const int guard = symbol < 0 ? 64 : 16;
+        packet.insert(packet.end(), spectrum.end() - guard, spectrum.end());
+        packet.insert(packet.end(), spectrum.begin(), spectrum.end());
+      }
+      for (size_t sample = 0; sample < packet.size(); ++sample)
+        packet[sample] *= std::polar(0.8, TWO_PI * 50000.0 * sample / 20.0e6);
+      Config config;
+      config.sampleRate = 20.0e6;
+      config.measureDataEvm = true;
+      config.dataMcs = mcs;
+      config.ehtLtfFftOffsetSamples = 864;
+      config.dataFftOffsetSamples = 1136;
+      config.numDataSymbols = 3;
+      const Result result = demodulate(withIdlePadding(packet, 50, 50), config);
+      CHECK(result.ok);
+      CHECK(result.dataEvmValid);
+      CHECK(result.numDataSymbols == 3);
+      CHECK(std::fabs(result.evmRmsData - std::sqrt(errorPower / referencePower)) < 1e-9);
+      wifi11axdemod::Config heConfig;
+      heConfig.sampleRate = config.sampleRate;
+      heConfig.dataConfig = config;
+      const wifi11axdemod::Result heResult = wifi11axdemod::demodulate(withIdlePadding(packet, 50, 50), heConfig);
+      CHECK(heResult.ok);
+      if (mcs <= 11) {
+        CHECK(heResult.dataResult.dataEvmValid);
+        CHECK(heResult.dataResult.numDataSymbols == 3);
+        CHECK(std::fabs(heResult.dataResult.evmRmsData - std::sqrt(errorPower / referencePower)) < 1e-9);
+      } else {
+        CHECK(!heResult.dataResult.dataEvmValid);
+        CHECK(!heResult.dataResult.dataError.empty());
+      }
+      Config invalidReuseConfig = config;
+      invalidReuseConfig.numSpatialStreams = 2;
+      Result reused = result;
+      measureDataEvm(withIdlePadding(packet, 50, 50), 50.0, invalidReuseConfig, reused);
+      CHECK(!reused.dataEvmValid);
+      CHECK(reused.numDataSymbols == 0);
+      reused = result;
+      measureDataEvm(std::vector<cd>(), 50.0, config, reused);
+      CHECK(!reused.dataEvmValid);
+      CHECK(!reused.dataError.empty());
+      for (int unsupported = 0; unsupported < 3; ++unsupported) {
+        Config invalidConfig = config;
+        if (unsupported == 0)
+          invalidConfig.dataBandwidthMHz = 40;
+        if (unsupported == 1)
+          invalidConfig.numSpatialStreams = 2;
+        if (unsupported == 2)
+          invalidConfig.ehtLtfType = 2;
+        const Result invalid = demodulate(withIdlePadding(packet, 50, 50), invalidConfig);
+        CHECK(invalid.ok);
+        CHECK(!invalid.dataEvmValid);
+        CHECK(!invalid.dataError.empty());
+      }
+      packet.resize(packet.size() - 128);
+      const Result truncated = demodulate(withIdlePadding(packet, 50, 0), config);
+      CHECK(truncated.ok);
+      CHECK(!truncated.dataEvmValid);
+      CHECK(truncated.dataError == "incomplete DATA field");
+      const wifi11axdemod::Result truncatedHe = wifi11axdemod::demodulate(withIdlePadding(packet, 50, 0), heConfig);
+      CHECK(!truncatedHe.dataResult.dataEvmValid);
+    }
+  }
+}
 }
 
 int main()
 {
+  Config dataConfig;
+  dataConfig.sampleRate = 20.0e6;
+  dataConfig.measureDataEvm = true;
+  const Result invalidData = demodulate(withIdlePadding(buildBePreamble(0.0, 20.0e6, 0.0, 12345u), 50, 50), dataConfig);
+  CHECK(invalidData.ok);
+  CHECK(invalidData.syncFound);
+  CHECK(!invalidData.dataEvmValid);
+  CHECK(!invalidData.dataError.empty());
   testBurstSyncRecovery();
   testCarrierFrequencyErrorRecovery();
   testNoiseRejection();
+  testDataEvm();
 
   if (gFailures == 0) {
     std::printf("All Wifi11beOfdmCore tests PASSED\n");

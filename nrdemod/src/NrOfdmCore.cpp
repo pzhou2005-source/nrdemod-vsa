@@ -344,11 +344,24 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
     const std::vector<bool>& excludedSc, Modulation mod, bool equalize, bool phaseTracking, bool timingTracking,
     bool amplitudeTracking, bool precoding, int iterations, int puncturedCarrier,
     const std::vector<std::vector<bool>>& resourceMask, int phaseWindowOverride = 0,
-    const std::vector<cd>* phaseReference = nullptr)
+    const std::vector<cd>* phaseReference = nullptr, bool calibrateSinglePass = false)
 {
   const size_t numSym = y.size();
   const size_t numSc = numSym ? y[0].size() : 0;
   const double dftScale = numSc ? 1.0 / std::sqrt(static_cast<double>(numSc)) : 1.0;
+  const double decisionScale = qamScale(mod);
+  const int maximumLevel = qamMaxLevel(mod);
+  const auto decide = [decisionScale, maximumLevel](const cd& point) {
+    return cd(decideAxis(point.real() / decisionScale, maximumLevel) * decisionScale,
+        decideAxis(point.imag() / decisionScale, maximumLevel) * decisionScale);
+  };
+  const bool profile = std::getenv("NR_DEMOD_PROFILE") != nullptr;
+  const auto profileStart = std::chrono::steady_clock::now();
+  const auto profileStage = [&](const char* stage) {
+    if (profile)
+      std::fprintf(stderr, "[demod-profile] equalizer-stage=%s ms=%.3f\n", stage,
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - profileStart).count());
+  };
 
   EqualizedGrid g;
   std::vector<bool> excludedFrequency(excludedSc);
@@ -377,18 +390,23 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
   }
   if (precoding && equalize && numSc > 0) {
     const double centre = 0.5 * static_cast<double>(numSc - 1);
+    std::vector<std::vector<cd>> timingInputs;
+    for (size_t symbol = 0; symbol < numSym && timingInputs.size() < 2; ++symbol) {
+      if (excludedSym[symbol])
+        continue;
+      timingInputs.emplace_back(numSc);
+      for (size_t carrier = 0; carrier < numSc; ++carrier)
+        timingInputs.back()[carrier] = excludedSc[carrier] ? cd(0.0, 0.0) : y[symbol][carrier] / g.channel[carrier];
+    }
     auto timingError = [&](double delay) {
       double error = 0.0;
-      size_t used = 0;
-      for (size_t symbol = 0; symbol < numSym && used < 2; ++symbol) {
-        if (excludedSym[symbol])
-          continue;
+      for (size_t symbol = 0; symbol < timingInputs.size(); ++symbol) {
         std::vector<cd> data(numSc);
         for (size_t carrier = 0; carrier < numSc; ++carrier) {
           data[carrier] =
               excludedSc[carrier]
                   ? cd(0.0, 0.0)
-                  : y[symbol][carrier] / g.channel[carrier] *
+                  : timingInputs[symbol][carrier] *
                         std::polar(1.0, -2.0 * PI * delay * (static_cast<double>(carrier) - centre) / numSc);
         }
         dft(data, true);
@@ -403,15 +421,14 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
         cd cross(0.0, 0.0);
         for (size_t point = 0; point < numSc; ++point) {
           const cd measured = data[point] * rotation;
-          cross += measured * std::conj(hardDecision(measured, mod));
+          cross += measured * std::conj(decide(measured));
         }
         if (phaseTracking && std::abs(cross) > 0.0)
           rotation *= std::polar(1.0, -std::arg(cross));
         for (size_t point = 0; point < numSc; ++point) {
           const cd measured = data[point] * rotation;
-          error += std::norm(measured - hardDecision(measured, mod));
+          error += std::norm(measured - decide(measured));
         }
-        ++used;
       }
       return error;
     };
@@ -438,6 +455,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
     for (size_t carrier = 0; carrier < numSc; ++carrier)
       g.channel[carrier] *= std::polar(1.0, 2.0 * PI * bestDelay * (static_cast<double>(carrier) - centre) / numSc);
   }
+  profileStage("channel-and-timing");
   g.z.assign(numSym, std::vector<cd>(numSc));
   g.ref.assign(numSym, std::vector<cd>(numSc));
   std::vector<std::vector<cd> > refFreq(numSym, std::vector<cd>(numSc));
@@ -456,8 +474,18 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
   if (puncturedCarrier >= 0 && equalize && iterations > 1)
     iterations = std::max(iterations, 12);
 
+  const bool convergenceEnabled = precoding && puncturedCarrier >= 0 && equalize && iterations > 1 &&
+                                  std::getenv("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS") == nullptr;
+  std::vector<std::vector<cd>> previousDecisions;
+  std::vector<std::vector<cd>> previousCorrections;
+  std::vector<cd> previousChannel;
+  double previousError = std::numeric_limits<double>::infinity();
+  int stableIterations = 0;
+  bool dataConverged = false;
   for (int it = 0; it < iterations; ++it) {
     for (size_t l = 0; l < numSym; ++l) {
+      if (dataConverged && !excludedSym[l])
+        continue;
       std::vector<cd>& d = g.z[l];
       for (size_t i = 0; i < numSc; ++i) {
         d[i] = y[l][i] / g.channel[i];
@@ -518,7 +546,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
                 if (excludedSc[carrier] || resourceMask[l][carrier])
                   continue;
                 const cd measured = d[carrier] * rotation - (carrier % 2 == 0 ? offset : -offset);
-                error += std::norm(measured - hardDecision(measured, mod));
+                error += std::norm(measured - decide(measured));
               }
               if (error < bestError) {
                 bestError = error;
@@ -540,7 +568,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
             if (excludedSc[i] || resourceMask[l][i])
               continue;
             const cd z = d[i] * rot;
-            acc += z * std::conj(hardDecision(z, mod));
+            acc += z * std::conj(decide(z));
           }
           if (std::abs(acc) == 0.0)
             break;
@@ -561,7 +589,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
           measuredFrequency = d;
           referenceFrequency.resize(numSc);
           for (size_t carrier = 0; carrier < numSc; ++carrier)
-            referenceFrequency[carrier] = hardDecision(d[carrier], mod);
+            referenceFrequency[carrier] = decide(d[carrier]);
           dft(measuredFrequency, false);
           dft(referenceFrequency, false);
           for (size_t carrier = 0; carrier < numSc; ++carrier) {
@@ -570,7 +598,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
           }
         }
         for (size_t i = 0; i < numSc; ++i) {
-          const cd ref = precoding ? referenceFrequency[i] : hardDecision(d[i], mod);
+          const cd ref = precoding ? referenceFrequency[i] : decide(d[i]);
           const cd measured = precoding ? measuredFrequency[i] : d[i];
           resid[l][i] = excludedFrequency[i] || resourceMask[l][i] ? cd(0.0, 0.0) : measured * std::conj(ref);
           if (excludedFrequency[i] || resourceMask[l][i])
@@ -582,7 +610,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
       }
 
       for (size_t i = 0; i < numSc; ++i) {
-        g.ref[l][i] = hardDecision(d[i], mod);
+        g.ref[l][i] = decide(d[i]);
       }
     }
 
@@ -631,6 +659,8 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
       }
       const double centre = 0.5 * static_cast<double>(numSc - 1);
       for (size_t l = 0; l < numSym; ++l) {
+        if (dataConverged && !excludedSym[l])
+          continue;
         std::vector<cd>& d = g.z[l];
         std::vector<cd>& c = corr[l];
         const double slope = slopes[l];
@@ -655,19 +685,21 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
         for (size_t i = 0; i < numSc && phaseTracking; ++i) {
           if (excludedSc[i] || resourceMask[l][i])
             continue;
-          acc += d[i] * std::conj(hardDecision(d[i], mod));
+          acc += d[i] * std::conj(decide(d[i]));
         }
         if (std::abs(acc) > 0.0) {
           const cd rot = std::polar(1.0, -std::arg(acc));
           for (size_t i = 0; i < numSc; ++i) { d[i] *= rot; c[i] *= rot; }
         }
         for (size_t i = 0; i < numSc; ++i) {
-          g.ref[l][i] = hardDecision(d[i], mod);
+          g.ref[l][i] = decide(d[i]);
         }
       }
     }
 
     for (size_t l = 0; l < numSym; ++l) {
+      if (dataConverged && !excludedSym[l])
+        continue;
       if (precoding) {
         refFreq[l] = g.ref[l];
         dft(refFreq[l], false);
@@ -675,6 +707,55 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
       } else {
         refFreq[l] = g.ref[l];
       }
+    }
+
+    if (profile || convergenceEnabled) {
+      double errorPower = 0.0, referencePower = 0.0;
+      double channelChange = 0.0, channelPower = 0.0;
+      double correctionChange = 0.0, correctionPower = 0.0;
+      size_t decisionChanges = 0;
+      for (size_t carrier = 0; carrier < numSc; ++carrier) {
+        if (!previousChannel.empty())
+          channelChange += std::norm(g.channel[carrier] - previousChannel[carrier]);
+        channelPower += std::norm(g.channel[carrier]);
+        for (size_t symbol = 0; symbol < numSym; ++symbol) {
+          if (excludedSym[symbol])
+            continue;
+          if (!previousDecisions.empty() && g.ref[symbol][carrier] != previousDecisions[symbol][carrier])
+            ++decisionChanges;
+          if (!previousCorrections.empty())
+            correctionChange += std::norm(corr[symbol][carrier] - previousCorrections[symbol][carrier]);
+          correctionPower += std::norm(corr[symbol][carrier]);
+          if (excludedSym[symbol] || excludedSc[carrier] || resourceMask[symbol][carrier])
+            continue;
+          errorPower += std::norm(g.z[symbol][carrier] - g.ref[symbol][carrier]);
+          referencePower += std::norm(g.ref[symbol][carrier]);
+        }
+      }
+      const double error = referencePower > 0.0 ? errorPower / referencePower : std::numeric_limits<double>::infinity();
+      const double channelDelta =
+          channelPower > 0.0 ? std::sqrt(channelChange / channelPower) : std::numeric_limits<double>::infinity();
+      const double correctionDelta = correctionPower > 0.0 ? std::sqrt(correctionChange / correctionPower)
+                                                           : std::numeric_limits<double>::infinity();
+      const bool stable = it >= 3 && !previousDecisions.empty() && decisionChanges == 0 && std::isfinite(error) &&
+                          channelDelta < 1e-6 && correctionDelta < 1e-6 &&
+                          100.0 * std::fabs(std::sqrt(error) - std::sqrt(previousError)) < 1e-5;
+      stableIterations = stable ? stableIterations + 1 : 0;
+      if (profile)
+        std::fprintf(stderr,
+            "[demod-profile] equalizer-iteration=%d/%d carriers=%zu precoding=%d decisionChanges=%zu error=%.9g "
+            "channelChange=%.9g correctionChange=%.9g stable=%d\n",
+            it + 1, iterations, numSc, precoding, decisionChanges, error, channelDelta, correctionDelta,
+            stableIterations);
+      if (convergenceEnabled && !dataConverged && stableIterations >= 2) {
+        if (profile)
+          std::fprintf(stderr, "[demod-profile] equalizer-converged iteration=%d/%d\n", it + 1, iterations);
+        dataConverged = true;
+      }
+      previousDecisions = g.ref;
+      previousCorrections = corr;
+      previousChannel = g.channel;
+      previousError = error;
     }
 
     if (!equalize || it == iterations - 1) {
@@ -699,7 +780,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
             if (excludedSym[symbol] || resourceMask[symbol][i])
               continue;
             const cd measured = g.z[symbol][i] / gain;
-            const cd decision = hardDecision(measured, mod);
+            const cd decision = decide(measured);
             error += std::norm(measured - decision);
             reference += std::norm(decision);
           }
@@ -717,7 +798,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
                 for (size_t symbol = 0; symbol < numSym; ++symbol) {
                   if (excludedSym[symbol] || resourceMask[symbol][i])
                     continue;
-                  const cd decision = hardDecision(g.z[symbol][i] / gain, mod);
+                  const cd decision = decide(g.z[symbol][i] / gain);
                   cross += g.z[symbol][i] * std::conj(decision);
                   reference += std::norm(decision);
                 }
@@ -742,7 +823,39 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
       }
     }
   }
-  if (equalize && !precoding && iterations > 1) {
+  if (equalize && precoding && iterations == 1 && calibrateSinglePass) {
+    std::vector<cd> channelCorrection(numSc, cd(1.0, 0.0));
+    for (size_t carrier = 0; carrier < numSc; ++carrier) {
+      if (excludedFrequency[carrier])
+        continue;
+      cd cross(0.0, 0.0);
+      double reference = 0.0;
+      for (size_t symbol = 0; symbol < numSym; ++symbol) {
+        if (excludedSym[symbol] || resourceMask[symbol][carrier])
+          continue;
+        cross += y[symbol][carrier] * corr[symbol][carrier] * std::conj(refFreq[symbol][carrier]);
+        reference += std::norm(refFreq[symbol][carrier]);
+      }
+      if (reference > 0.0 && std::abs(cross) > 0.0) {
+        const cd channel = cross / reference;
+        channelCorrection[carrier] = g.channel[carrier] / channel;
+        g.channel[carrier] = channel;
+      }
+    }
+    for (size_t symbol = 0; symbol < numSym; ++symbol) {
+      dft(g.z[symbol], false);
+      for (size_t carrier = 0; carrier < numSc; ++carrier)
+        g.z[symbol][carrier] *= dftScale * channelCorrection[carrier];
+      if (puncturedCarrier >= 0 && !excludedSym[symbol])
+        g.z[symbol][puncturedCarrier] = refFreq[symbol][puncturedCarrier];
+      dft(g.z[symbol], true);
+      for (size_t carrier = 0; carrier < numSc; ++carrier) {
+        g.z[symbol][carrier] *= dftScale;
+        g.ref[symbol][carrier] = decide(g.z[symbol][carrier]);
+      }
+    }
+  }
+  if (equalize && !precoding && (iterations > 1 || calibrateSinglePass)) {
     for (size_t carrier = 0; carrier < numSc; ++carrier) {
       if (excludedFrequency[carrier])
         continue;
@@ -759,7 +872,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
         g.channel[carrier] *= gain;
         for (size_t symbol = 0; symbol < numSym; ++symbol) {
           g.z[symbol][carrier] /= gain;
-          g.ref[symbol][carrier] = hardDecision(g.z[symbol][carrier], mod);
+          g.ref[symbol][carrier] = decide(g.z[symbol][carrier]);
         }
       }
     }
@@ -771,6 +884,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
     for (size_t i = 0; i < numSc; ++i) if (!excludedSc[i]) acc += corr[l][i];
     g.cpe[l] = std::abs(acc) > 0.0 ? -std::arg(acc) : 0.0;
   }
+  profileStage("complete");
   return g;
 }
 
@@ -786,7 +900,7 @@ Config::Config()
     : numerology(1), fftSize(0), frequencyRange(FR1), channelBandwidthMHz(0), numResourceBlocks(0),
       resourceBlockOffset(0), extendedCp(false), modulation(MOD_AUTO), maxSymbols(0), burstSearch(true),
       burstSearchThresholdDb(-20.0), timingSearch(true), syncSearchSymbols(4), cfoCorrection(true),
-      carrierOffsetHz(0.0), equalize(true), equalizerIterations(3), phaseTracking(true), timingTracking(true),
+      carrierOffsetHz(0.0), equalize(true), equalizerIterations(1), phaseTracking(true), timingTracking(true),
       amplitudeTracking(true), transformPrecoding(false), dcPunctured(false), removeIqOffset(false),
       symbolTimingAdjustmentPercent(-3.125), resample(true), sampleRate(0.0), ssbSearch(true)
 {
@@ -796,8 +910,8 @@ Result::Result()
     : ok(false), fftSize(0), resampleRate(0.0), numResourceBlocks(0), carrierResourceBlocks(0), firstSubcarrierIndex(0),
       numSymbols(0), timingOffset(0), slotStartSymbol(0), acquisitionFrequencyErrorHz(0.0), frequencyErrorHz(0.0),
       detectedModulation(MOD_QPSK), rmsEvmPercent(0.0), peakEvmPercent(0.0), rmsEvmDb(0.0), burstStart(0),
-      burstLength(0), syncCorrelation(0.0), normalizationFactor(1.0), dataPowerDb(0.0), burstPowerDb(0.0),
-      iqOffsetDb(0.0), iqGainImbalanceDb(0.0), iqQuadratureErrorDeg(0.0), iqTimingSkewSec(0.0),
+      burstLength(0), burstTransitionFound(false), syncCorrelation(0.0), normalizationFactor(1.0), dataPowerDb(0.0),
+      burstPowerDb(0.0), iqOffsetDb(0.0), iqGainImbalanceDb(0.0), iqQuadratureErrorDeg(0.0), iqTimingSkewSec(0.0),
       commonPhaseErrorDeg(0.0), dmrsEvmPercent(0.0), dmrsPowerDb(0.0), flatnessRippleRange1Db(0.0),
       flatnessRippleRange2Db(0.0), flatnessMaxRange1MinRange2Db(0.0), flatnessMaxRange2MinRange1Db(0.0),
       peakEvmSymbol(0), peakEvmSubcarrier(0), numSlots(0), firstSlotIndex(0)
@@ -1129,25 +1243,43 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
     for (size_t m = 0; m + win <= total; m += 16) peak = std::max(peak, (cum[m + win] - cum[m]) / static_cast<double>(win));
     const double thr = peak * std::pow(10.0, cfg.burstSearchThresholdDb / 10.0);
     const size_t edge = static_cast<size_t>(std::max(16, cpNormal));
+    const size_t minimumBurst = static_cast<size_t>(std::max(1, cfg.maxSymbols)) * symLen;
     size_t first = total, last = 0;
     size_t segmentStart = total, segmentEnd = 0;
     size_t boundedStart = total, boundedEnd = 0;
     bool quietAfterBurst = false;
     for (size_t m = 0; m + edge <= total; m += 16) {
       const double envelope = (cum[m + edge] - cum[m]) / static_cast<double>(edge);
-      if (envelope > thr) {
+      size_t quietStart = total;
+      if (segmentStart < total && m >= segmentStart && m - segmentStart >= minimumBurst) {
+        for (size_t offset = 0; offset < 16 && m + offset + 16 <= total; ++offset) {
+          if ((cum[m + offset + 16] - cum[m + offset]) / 16.0 <= thr) {
+            quietStart = m + offset;
+            break;
+          }
+        }
+      }
+      const bool shortEnd = quietStart < total;
+      if (shortEnd)
+        segmentEnd = std::min(segmentEnd, quietStart);
+      if (envelope > thr && !shortEnd) {
         if (first == total) first = m;
         if (segmentStart == total)
           segmentStart = m;
         segmentEnd = m + edge;
         last = m + edge;
         quietAfterBurst = false;
-      } else if (first < total && m >= last) {
+      } else if (first < total && (m >= last || shortEnd)) {
         quietAfterBurst = true;
-        if (boundedStart == total && segmentStart >= edge && segmentStart < segmentEnd &&
-            segmentEnd - segmentStart >= static_cast<size_t>(symLen)) {
-          boundedStart = segmentStart;
-          boundedEnd = segmentEnd;
+        if (boundedStart == total && segmentStart < segmentEnd && segmentEnd - segmentStart >= minimumBurst) {
+          bool completeStart = segmentStart >= edge;
+          for (size_t offset = 0; !completeStart && offset < edge; ++offset)
+            completeStart = cpMetric(x, segmentStart + offset, cpNormal, N, nullptr) > 0.99;
+          if (completeStart) {
+            boundedStart = segmentStart;
+            boundedEnd = segmentEnd;
+            break;
+          }
         }
         segmentStart = total;
         segmentEnd = 0;
@@ -1157,6 +1289,9 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
       first = boundedStart;
       last = boundedEnd;
       quietAfterBurst = true;
+    } else if (first < total && quietAfterBurst) {
+      r.error = "Burst Searching failed: no complete burst contains the requested symbols.";
+      return r;
     }
     if (first < last) {
       burstEndDetected = first < edge || quietAfterBurst;
@@ -1171,6 +1306,7 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
       }
     }
   }
+  r.burstTransitionFound = burstEndDetected;
   const size_t n = x.size();
   {
     cd dc(0.0, 0.0);
@@ -1545,7 +1681,7 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
 
   EqualizedGrid g = equalizeAndDecide(y, excludedFromDecisions, excludedSc, mod, cfg.equalize, cfg.phaseTracking,
       cfg.timingTracking, cfg.amplitudeTracking, cfg.transformPrecoding, cfg.equalizerIterations, puncturedCarrier,
-      resourceMask, 0, &phaseReference);
+      resourceMask, 0, &phaseReference, true);
   auto decisionError = [&](const EqualizedGrid& candidate) {
     double error = 0.0, reference = 0.0;
     for (size_t symbol = 0; symbol < numSym; ++symbol) {
@@ -1561,7 +1697,8 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
     return reference > 0.0 ? error / reference : std::numeric_limits<double>::infinity();
   };
   int phaseWindowOverride = 0;
-  if (!cfg.transformPrecoding && cfg.equalize && cfg.phaseTracking && mod == MOD_QAM256 && decisionError(g) > 1e-6) {
+  if (cfg.equalizerIterations > 1 && !cfg.transformPrecoding && cfg.equalize && cfg.phaseTracking &&
+      mod == MOD_QAM256 && decisionError(g) > 1e-6) {
     double bestError = decisionError(g);
     for (const int window : {8, 32, 64}) {
       EqualizedGrid candidate = equalizeAndDecide(y, excludedFromDecisions, excludedSc, mod, cfg.equalize,
@@ -1575,7 +1712,7 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
       }
     }
   }
-  if (cfg.cfoCorrection && cfg.phaseTracking) {
+  if (cfg.equalizerIterations > 1 && cfg.cfoCorrection && cfg.phaseTracking) {
     double errorPower = 0.0, referencePower = 0.0;
     double sumTime = 0.0, sumPhase = 0.0, sumTimeSquared = 0.0, sumTimePhase = 0.0;
     double previousPhase = 0.0;

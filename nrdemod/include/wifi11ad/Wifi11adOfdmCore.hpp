@@ -2,8 +2,8 @@
 /**
  ****************************************************************************
  *
- * Native IEEE 802.11ad (DMG, 60 GHz / WiGig) demodulator core - burst
- * detection only.
+ * Native IEEE 802.11ad (DMG, 60 GHz / WiGig) burst detector and optional
+ * explicitly configured single-carrier DATA EVM measurement.
  *
  * Pure C++ / STL. 802.11ad uses a fundamentally different PHY from every
  * other WiFi variant in this codebase: a single-carrier (SC) modulation
@@ -11,19 +11,13 @@
  * 802.11-2016 clause 20.5.3), not an OFDM L-STF/L-LTF structure at all - so
  * none of the existing wifi/wifi11n/wifi11ac/wifi11ax sync code applies.
  *
- * Scope: ONLY power-threshold burst detection (reusing the same windowed-
- * power algorithm already validated by every other native core in this
- * codebase) is implemented. The Golay STF/CE correlation sync, CE-field
- * channel estimate, and SC/OFDM DATA field decode are NOT implemented:
- * the exact Ga128/Gb128 sequence content could not be obtained from a
- * source this project could independently verify against real captures
- * (unlike the 802.11a LTF table or the CCK codeword formula, both of which
- * were cross-checked against multiple independent sources AND real TDC
- * captures before being hardcoded) - rather than guess at an unverified
- * 128-chip sequence and silently risk producing a confidently-wrong sync
- * result, this core deliberately stops at the one thing it CAN verify:
- * burst presence via power envelope, which needs no sequence content at
- * all. mcsIndex/syncRho/frequencyErrorHz/EVM are NOT produced.
+ * DATA scope: one sample per chip at 1.76 GSa/s, flat channel, SC MCS1-9.
+ * Callers supply an independent known 128-chip +/- STF reference repeated
+ * four times, and absolute training/DATA offsets. Training estimates CFO,
+ * phase and scalar channel gain; DATA excludes the first 64 chips of each
+ * 512-chip block. EVM is a ratio against nearest constellation decisions.
+ * No built-in Golay table, automatic field/header decode, CE multipath
+ * equalizer, RRC matched filter, payload bit decode or OFDM support.
  *
  * Copyright by Advantest Europe GmbH
  *
@@ -38,6 +32,13 @@ namespace wifi11addemod {
 
 struct Config {
   double burstSearchThresholdDb; // power threshold below the peak, dB
+  bool measureDataEvm;
+  double sampleRate;
+  std::string trainingReference;
+  int trainingOffsetSamples;
+  int dataOffsetSamples;
+  int dataBlockCount;
+  int dataMcs;
 
   Config();
 };
@@ -49,6 +50,12 @@ struct Result {
   bool burstFound;
   int  burstStart;
   int  burstLength;
+  bool dataEvmValid;
+  std::string dataError;
+  double trainingRho;
+  double frequencyErrorHz;
+  double evmRmsData;
+  int numDataSymbols;
 
   Result();
 };

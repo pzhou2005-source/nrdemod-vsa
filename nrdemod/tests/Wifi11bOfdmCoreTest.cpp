@@ -155,6 +155,31 @@ void testNoiseOnlyCaptureFailsSync()
 
 int main()
 {
+  for (bool dqpsk : {false, true}) {
+    std::vector<cd> packet = buildPreamble(0.0, 11.0e6, 0.0, 1u);
+    for (int symbol = 0; symbol < 32; ++symbol) {
+      const cd reference = std::polar(1.0, (dqpsk ? PI / 2.0 : PI) * (symbol % (dqpsk ? 4 : 2)));
+      for (int chip = 0; chip < BARKER_LEN; ++chip)
+        packet.push_back((reference + cd(0.001, -0.001)) * BARKER[chip] * std::polar(0.8, 0.3));
+    }
+    for (size_t chip = 0; chip < 192 * BARKER_LEN; ++chip)
+      packet[chip] *= 0.8;
+    Config config;
+    config.sampleRate = 11.0e6;
+    config.burstSearch = false;
+    config.measureBarkerData = true;
+    config.barkerDataDqpsk = dqpsk;
+    config.barkerDataSymbolOffset = 192;
+    config.barkerDataSymbolCount = 32;
+    const Result result = demodulate(packet, config);
+    CHECK(result.ok);
+    CHECK(result.numDataSymbolsMeasured == 32);
+    CHECK_NEAR(result.dataRmsEvmPercent, 100.0 * std::sqrt(2.0) * 0.001, 1e-8);
+    config.barkerDataSymbolCount = 64;
+    const Result truncated = demodulate(packet, config);
+    CHECK(truncated.numDataSymbolsMeasured == 0);
+    CHECK(!truncated.dataError.empty());
+  }
   testBurstSyncAndEvm();
   testCarrierFrequencyErrorRecovery();
   testNoBurstWhenCaptureIsEmpty();

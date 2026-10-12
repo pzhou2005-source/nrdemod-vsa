@@ -1,0 +1,34 @@
+{
+  "name": "fr1_100mhz_mu1_256qam_dfts",
+  "demod": {
+    "numerology": 1,
+    "frequencyRange": 1,
+    "channelBandwidthMHz": 100,
+    "fftSize": 4096,
+    "numResourceBlocks": 270,
+    "resourceBlockOffset": 0,
+    "modulation": "256qam",
+    "sampleRate": 122880000.0,
+    "transformPrecoding": true,
+    "maxSymbols": 14,
+    "carrierOffsetHz": 0.0,
+    "dcPunctured": true,
+    "removeIqOffset": true,
+    "symbolTimingAdjustmentPercent": -3.125,
+    "dmrsExclude": true,
+    "dmrsMappingTypeB": false,
+    "dmrsTypeAPosition": 2,
+    "dmrsAdditionalPositions": 0,
+    "dmrsDoubleSymbol": false,
+    "equalizerIterations": 1
+  },
+  "vsa": {
+    "centerHz": 3750000000.0,
+    "spanHz": 122880000.0,
+    "points": 2097152
+  },
+  "tolerance": {
+    "evmPercentPoints": 0.5,
+    "freqErrorHz": 50.0
+  }
+}
