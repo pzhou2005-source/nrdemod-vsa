@@ -191,6 +191,14 @@ int main()
   testBurstSyncRecovery();
   testCarrierFrequencyErrorRecovery();
   testNoiseRejection();
+  Config dataConfig;
+  dataConfig.sampleRate = 20.0e6;
+  dataConfig.dataConfig.measureDataEvm = true;
+  const Result invalidData = demodulate(withIdlePadding(buildHePreamble(0.0, 20.0e6, 0.0, 12345u), 50, 50), dataConfig);
+  CHECK(invalidData.ok);
+  CHECK(invalidData.syncFound);
+  CHECK(!invalidData.dataResult.dataEvmValid);
+  CHECK(!invalidData.dataResult.dataError.empty());
 
   if (gFailures == 0) {
     std::printf("All Wifi11axOfdmCore tests PASSED\n");

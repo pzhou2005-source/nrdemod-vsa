@@ -229,7 +229,9 @@ double cckBestFitResidualFraction(const std::vector<cd>& seg, const std::vector<
 
 }
 
-Config::Config() : sampleRate(0.0), burstSearch(true), burstSearchThresholdDb(15.0), syncThreshold(0.5)
+Config::Config()
+    : sampleRate(0.0), burstSearch(true), burstSearchThresholdDb(15.0), syncThreshold(0.5), measureBarkerData(false),
+      barkerDataDqpsk(false), barkerDataSymbolOffset(-1), barkerDataSymbolCount(0)
 {
 }
 
@@ -448,6 +450,43 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
     result.dataRmsEvmPercent =
         dataEvmCount > 0 ? 100.0 * std::sqrt(dataEvmSumSquares / static_cast<double>(dataEvmCount)) : 0.0;
     result.dataPeakEvmPercent = dataEvmPeak >= 0.0 ? 100.0 * std::sqrt(dataEvmPeak) : 0.0;
+  }
+
+  if (config.measureBarkerData && !result.isCckDataRate) {
+    const long long firstChip = bestPos + static_cast<long long>(config.barkerDataSymbolOffset) * BARKER_LEN;
+    const long long finalChip = firstChip + static_cast<long long>(config.barkerDataSymbolCount) * BARKER_LEN;
+    if (config.barkerDataSymbolOffset < 128 || config.barkerDataSymbolCount <= 0 || firstChip < 0 ||
+        finalChip > std::min(static_cast<long long>(bestChips.size()),
+                        static_cast<long long>(burstStart + burstLength) / osr)) {
+      result.dataError = "Barker DATA requires explicit post-SYNC symbol offset/count and complete capture";
+    } else {
+      double gain = 0.0;
+      for (const auto& correlation : symbolCorr)
+        gain += std::abs(correlation);
+      gain /= numSymbols;
+      double errorSum = 0.0, peakError = 0.0;
+      for (int symbol = 0; gain > 0.0 && symbol < config.barkerDataSymbolCount; ++symbol) {
+        cd correlation(0.0, 0.0);
+        const int chipStart = static_cast<int>(firstChip + symbol * BARKER_LEN);
+        for (int chip = 0; chip < BARKER_LEN; ++chip)
+          correlation += bestChips[chipStart + chip] * BARKER[chip];
+        const cd value = correlation / gain *
+                         std::polar(1.0, -freqRadPerSymbol * (config.barkerDataSymbolOffset + symbol) - staticRotation);
+        const cd reference = config.barkerDataDqpsk && std::fabs(value.imag()) > std::fabs(value.real())
+                                 ? cd(0.0, value.imag() < 0.0 ? -1.0 : 1.0)
+                                 : hardDecisionBpsk(value);
+        const double error = std::norm(value - reference);
+        errorSum += error;
+        peakError = std::max(peakError, error);
+      }
+      if (gain > 0.0 && std::isfinite(gain) && std::isfinite(errorSum)) {
+        result.numDataSymbolsMeasured = config.barkerDataSymbolCount;
+        result.dataRmsEvmPercent = 100.0 * std::sqrt(errorSum / config.barkerDataSymbolCount);
+        result.dataPeakEvmPercent = 100.0 * std::sqrt(peakError);
+      } else {
+        result.dataError = "invalid Barker DATA training gain or residual";
+      }
+    }
   }
 
   result.ok = true;

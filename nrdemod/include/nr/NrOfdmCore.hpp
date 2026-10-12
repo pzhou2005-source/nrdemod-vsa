@@ -108,6 +108,7 @@ struct Result {
   double rmsEvmDb;
   int    burstStart;          // first sample of the detected burst
   int    burstLength;         // burst length in samples
+  bool burstTransitionFound;  // burst search saw the burst edge (always true with burstSearch off)
   double syncCorrelation;     // normalised CP correlation magnitude
   double normalizationFactor; // 1/gain applied to the constellation
   double dataPowerDb;         // average data subcarrier power (dB)

@@ -60,6 +60,70 @@ void testCpLengths()
   CHECK(symbolsPerSlot(true) == 12);
 }
 
+void checkDataCorrelation(const Result& result, const std::vector<std::complex<double>>& reference, size_t carriers)
+{
+  CHECK(result.constellation.size() == result.numSymbols * carriers);
+  CHECK(reference.size() == (result.numSymbols - result.dmrsSymbols.size()) * carriers);
+  if (result.constellation.size() != result.numSymbols * carriers ||
+      reference.size() != (result.numSymbols - result.dmrsSymbols.size()) * carriers)
+    return;
+  size_t referenceStart = 0;
+  for (int symbol = 0; symbol < result.numSymbols; ++symbol) {
+    if (std::find(result.dmrsSymbols.begin(), result.dmrsSymbols.end(), symbol) != result.dmrsSymbols.end())
+      continue;
+    std::complex<double> cross(0.0, 0.0);
+    double measuredPower = 0.0, referencePower = 0.0;
+    for (size_t carrier = 0; carrier < carriers; ++carrier) {
+      const auto measured = result.constellation[symbol * carriers + carrier];
+      const auto expected = reference[referenceStart + carrier];
+      cross += measured * std::conj(expected);
+      measuredPower += std::norm(measured);
+      referencePower += std::norm(expected);
+    }
+    CHECK(std::abs(cross) / std::sqrt(measuredPower * referencePower) > 0.999);
+    referenceStart += carriers;
+  }
+}
+
+void testSinglePassEqualizer()
+{
+  Config cfg;
+  CHECK(cfg.equalizerIterations == 1);
+  cfg.numerology = 1;
+  cfg.fftSize = 512;
+  cfg.sampleRate = 15.36e6;
+  cfg.numResourceBlocks = 20;
+  cfg.modulation = MOD_QAM256;
+  cfg.burstSearch = false;
+  cfg.timingSearch = false;
+  for (const bool precoding : {false, true}) {
+    cfg.modulation = precoding ? MOD_QAM256 : MOD_QAM16;
+    cfg.transformPrecoding = precoding;
+    cfg.dcPunctured = precoding;
+    for (const int symbols : {14, 28, 56}) {
+      cfg.maxSymbols = symbols;
+      for (const unsigned seed : {8139u, 4242u, 12345u}) {
+        for (const double noiseRms : {0.0, 0.002, 0.01}) {
+          std::vector<std::complex<double>> reference;
+          auto capture = generateTestSignal(cfg, symbols, 0, seed, &reference);
+          const double cfo = seed == 4242u ? -0.04 : 0.02;
+          addNoiseAndOffsets(capture, noiseRms, cfo, cfg.fftSize, 0.2, 711u);
+          const Result result = demodulate(capture.data(), capture.size(), cfg);
+          std::printf(
+              "single-pass-regression precoding=%d symbols=%d samples=%zu seed=%u noise=%g evm=%g frequency=%g\n",
+              precoding, symbols, capture.size(), seed, noiseRms, result.rmsEvmPercent, result.frequencyErrorHz);
+          CHECK(result.ok);
+          CHECK(result.numSymbols == symbols);
+          CHECK(std::isfinite(result.rmsEvmPercent));
+          CHECK(result.rmsEvmPercent < (noiseRms > 0.002 ? 2.0 : 0.5));
+          CHECK_NEAR(result.frequencyErrorHz, result.acquisitionFrequencyErrorHz, 1e-12);
+          checkDataCorrelation(result, reference, 12 * cfg.numResourceBlocks);
+        }
+      }
+    }
+  }
+}
+
 void testFftRoundTrip()
 {
   std::vector<std::complex<double> > a(256);
@@ -149,6 +213,7 @@ void testCarrierTable()
 void testDmrsSequenceDecode()
 {
   Config cfg;
+  cfg.equalizerIterations = 3;
   cfg.numerology = 1;
   cfg.fftSize = 512;
   cfg.sampleRate = 15360000.0;
@@ -201,6 +266,7 @@ void testCpPhaseAcquisition()
 {
   for (const int blocks : {1, 51}) {
     Config cfg;
+    cfg.equalizerIterations = 3;
     cfg.numerology = 0;
     cfg.fftSize = 2048;
     cfg.sampleRate = cfg.fftSize * 15e3;
@@ -245,6 +311,7 @@ void testMixedSsbData()
 {
   for (const int blocks : {32, 51}) {
     Config cfg;
+    cfg.equalizerIterations = 3;
     cfg.numerology = blocks == 32 ? 3 : 1;
     cfg.fftSize = blocks == 32 ? 512 : 1024;
     cfg.sampleRate = cfg.fftSize * 15e3 * (1 << cfg.numerology);
@@ -315,10 +382,15 @@ void testMixedSsbData()
 
 void testDftsDcAndFractionalTiming()
 {
+  const char* fixedIterations = std::getenv("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS");
+  const bool hadFixedIterations = fixedIterations != nullptr;
+  const std::string savedFixedIterations = fixedIterations ? fixedIterations : "";
+  unsetenv("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS");
   const Modulation modulations[] = {MOD_QAM16, MOD_QAM64, MOD_QAM256};
   for (const int numerology : {1, 4}) {
     for (const Modulation modulation : modulations) {
       Config cfg;
+      cfg.equalizerIterations = 3;
       cfg.numerology = numerology;
       cfg.fftSize = numerology == 4 ? 256 : 1024;
       cfg.sampleRate = cfg.fftSize * 15000.0 * (1 << numerology);
@@ -352,6 +424,27 @@ void testDftsDcAndFractionalTiming()
           }
           start += cfg.fftSize + prefix;
         }
+        for (const double noise : {0.0, 0.01, 0.1}) {
+          auto impairedCapture = capture;
+          addNoiseAndOffsets(impairedCapture, noise, 0.02, cfg.fftSize, 0.2, 7171u);
+          const Result adaptive = demodulate(impairedCapture.data(), impairedCapture.size(), cfg);
+          setenv("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS", "1", 1);
+          const Result fixed = demodulate(impairedCapture.data(), impairedCapture.size(), cfg);
+          unsetenv("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS");
+          CHECK(adaptive.ok && fixed.ok);
+          CHECK(adaptive.numSymbols == fixed.numSymbols);
+          CHECK_NEAR(adaptive.rmsEvmPercent, fixed.rmsEvmPercent, 1e-4);
+          CHECK_NEAR(adaptive.frequencyErrorHz, fixed.frequencyErrorHz, 0.05);
+          CHECK(adaptive.constellation.size() == fixed.constellation.size());
+          if (adaptive.constellation.size() == fixed.constellation.size()) {
+            double differencePower = 0.0, referencePower = 0.0;
+            for (size_t point = 0; point < fixed.constellation.size(); ++point) {
+              differencePower += std::norm(adaptive.constellation[point] - fixed.constellation[point]);
+              referencePower += std::norm(fixed.constellation[point]);
+            }
+            CHECK(referencePower > 0.0 && differencePower / referencePower < 1e-10);
+          }
+        }
         const Result result = demodulate(capture.data(), capture.size(), cfg);
         std::printf("  dfts-dc-timing mod=%d delay=%.2f EVM=%.6f %%\n", modulation, delay, result.rmsEvmPercent);
         CHECK(result.ok);
@@ -379,6 +472,8 @@ void testDftsDcAndFractionalTiming()
       }
     }
   }
+  if (hadFixedIterations)
+    setenv("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS", savedFixedIterations.c_str(), 1);
 }
 
 struct Impairment {
@@ -464,6 +559,7 @@ Result runScenario(const char* title, Config cfg, int numSymbols, int leading,
 void testCompleteBurstSelection()
 {
   Config cfg;
+  cfg.equalizerIterations = 3;
   cfg.numerology = 1;
   cfg.fftSize = 512;
   cfg.sampleRate = 15360000.0;
@@ -481,23 +577,88 @@ void testCompleteBurstSelection()
   CHECK(std::abs(result.timingOffset - 3048) <= 2);
   CHECK(result.numSymbols == 14);
   CHECK(result.rmsEvmPercent < 0.05);
-  const size_t subcarriers = 12 * cfg.numResourceBlocks;
-  CHECK(result.constellation.size() == 14 * subcarriers);
-  CHECK(reference.size() == (14 - result.dmrsSymbols.size()) * subcarriers);
-  size_t referencePoint = 0;
-  for (int symbol = 0; symbol < result.numSymbols; ++symbol) {
-    if (std::find(result.dmrsSymbols.begin(), result.dmrsSymbols.end(), symbol) != result.dmrsSymbols.end())
-      continue;
-    std::complex<double> cross(0.0, 0.0);
-    double measuredPower = 0.0, referencePower = 0.0;
-    for (size_t carrier = 0; carrier < subcarriers; ++carrier) {
-      const std::complex<double> measured = result.constellation[symbol * subcarriers + carrier];
-      cross += measured * std::conj(reference[referencePoint]);
-      measuredPower += std::norm(measured);
-      referencePower += std::norm(reference[referencePoint]);
-      ++referencePoint;
+  checkDataCorrelation(result, reference, 12 * cfg.numResourceBlocks);
+}
+
+void testMultipleBursts()
+{
+  for (const bool precoding : {false, true}) {
+    for (const int iterations : {1, 3}) {
+      Config cfg;
+      cfg.equalizerIterations = iterations;
+      cfg.numerology = 1;
+      cfg.fftSize = 512;
+      cfg.sampleRate = 15.36e6;
+      cfg.numResourceBlocks = 20;
+      cfg.modulation = precoding ? MOD_QAM256 : MOD_QAM16;
+      cfg.transformPrecoding = precoding;
+      cfg.dcPunctured = precoding;
+      for (const int scenario : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}) {
+        auto first = generateTestSignal(cfg, 14, 0, 111u, nullptr);
+        auto second = generateTestSignal(cfg, 28, 0, 222u, nullptr);
+        addNoiseAndOffsets(first, 0.002, 0.02, cfg.fftSize, 0.2, 711u);
+        addNoiseAndOffsets(second, 0.002, -0.03, cfg.fftSize, -0.1, 712u);
+        const float firstAmplitude = scenario == 3 ? 0.03f : 0.5f;
+        for (auto& value : first)
+          value *= firstAmplitude;
+        const size_t gap = scenario == 2 || scenario == 7 ? 16 : 2048;
+        std::vector<std::complex<float>> capture;
+        if (scenario == 1)
+          capture.assign(first.end() - 1000, first.end());
+        else if (scenario == 9)
+          capture.assign(second.begin() + 3000, second.end());
+        else {
+          capture.resize(scenario == 6 ? 0 : scenario == 7 ? 2049 : 2048, std::complex<float>(0.0f, 0.0f));
+            capture.insert(capture.end(), first.begin(),
+              scenario == 5 || scenario == 8 ? first.begin() + first.size() / 2 : first.end());
+        }
+        capture.resize(capture.size() + gap, std::complex<float>(0.0f, 0.0f));
+        const size_t secondStart = capture.size();
+        capture.insert(capture.end(), second.begin(), scenario == 4 ? second.begin() + 1000 :
+          scenario == 8 ? second.begin() + second.size() / 4 : second.end());
+        if (scenario != 4)
+          capture.resize(capture.size() + 2048, std::complex<float>(0.0f, 0.0f));
+        const bool selectSecond = scenario == 1 || scenario == 3 || scenario == 5 || scenario == 9;
+        const auto& selected = selectSecond ? second : first;
+        const size_t selectedStart = selectSecond ? secondStart : scenario == 6 ? 0 : scenario == 7 ? 2049 : 2048;
+        cfg.maxSymbols = selectSecond && scenario != 9 ? 28 : 14;
+        std::vector<std::complex<float>> isolated(2048, std::complex<float>(0.0f, 0.0f));
+        isolated.insert(isolated.end(), selected.begin(), selected.end());
+        isolated.resize(isolated.size() + 2048, std::complex<float>(0.0f, 0.0f));
+        const Result reference = demodulate(isolated.data(), isolated.size(), cfg);
+        const Result result = demodulate(capture.data(), capture.size(), cfg);
+        std::printf("multi-burst-regression precoding=%d iterations=%d scenario=%d samples=%zu selected=%d start=%d "
+                    "length=%d symbols=%d evm=%g isolatedEvm=%g frequency=%g isolatedFrequency=%g\n",
+            precoding, iterations, scenario, capture.size(), selectSecond ? 2 : 1, result.timingOffset,
+            result.burstLength, result.numSymbols, result.rmsEvmPercent, reference.rmsEvmPercent,
+            result.frequencyErrorHz, reference.frequencyErrorHz);
+        if (scenario == 8) {
+          CHECK(!result.ok);
+          CHECK(!result.error.empty());
+          continue;
+        }
+        CHECK(reference.ok);
+        CHECK(result.ok);
+        CHECK(result.burstTransitionFound);
+        CHECK(std::abs(result.timingOffset - static_cast<int>(selectedStart)) <= 2);
+        CHECK(result.numSymbols == cfg.maxSymbols);
+        CHECK(result.rmsEvmPercent < 0.5);
+        CHECK_NEAR(result.rmsEvmPercent, reference.rmsEvmPercent, 0.02);
+        CHECK_NEAR(result.frequencyErrorHz, reference.frequencyErrorHz, 0.1);
+        CHECK(result.constellation.size() == reference.constellation.size());
+        CHECK(std::abs(result.burstLength - static_cast<int>(selected.size())) <= 2 * cfg.fftSize);
+        if (result.constellation.size() != reference.constellation.size())
+          continue;
+        std::complex<double> cross(0.0, 0.0);
+        double measuredPower = 0.0, referencePower = 0.0;
+        for (size_t point = 0; point < result.constellation.size(); ++point) {
+          cross += result.constellation[point] * std::conj(reference.constellation[point]);
+          measuredPower += std::norm(result.constellation[point]);
+          referencePower += std::norm(reference.constellation[point]);
+        }
+        CHECK(std::abs(cross) / std::sqrt(measuredPower * referencePower) > 0.999);
+      }
     }
-    CHECK(std::abs(cross) / std::sqrt(measuredPower * referencePower) > 0.999);
   }
 }
 
@@ -505,6 +666,7 @@ void runLoopback(int mu, int fftSize, Modulation mod, int numSymbols, int leadin
     double noiseRms, double cfoFraction, bool autoDetect, double evmLimit)
 {
   Config cfg;
+  cfg.equalizerIterations = 3;
   cfg.numerology = mu;
   cfg.fftSize = fftSize;
   cfg.sampleRate = fftSize * 15000.0 * (1 << mu);
@@ -598,6 +760,7 @@ Result runScenario(const char* title, Config cfg, int numSymbols, int leading,
 int main()
 {
   testCpLengths();
+  testSinglePassEqualizer();
   testFftRoundTrip();
   testDftArbitraryLength();
   testResamplerTone();
@@ -607,6 +770,7 @@ int main()
   testCpPhaseAcquisition();
   testMixedSsbData();
   testCompleteBurstSelection();
+  testMultipleBursts();
   testDftsDcAndFractionalTiming();
 
   runLoopback(4, 512, MOD_QAM256, 14, 0, 0.0, 0.0, false, 0.1);
@@ -631,6 +795,7 @@ int main()
   {
     // FR1 100 MHz, mu 2, 135 RB, 122.88 MSa/s: same as 5GNR_FR1_FDD_UL_100MHz_mu2_MCS27_256QAM_CP.para2
     Config cfg;
+    cfg.equalizerIterations = 3;
     cfg.numerology = 2;
     cfg.frequencyRange = FR1;
     cfg.channelBandwidthMHz = 100;
@@ -655,6 +820,7 @@ int main()
   {
     // FR2 100 MHz, mu 3, 66 RB, captured at 220.000224 MSa/s (not on the FFT grid -> resampling)
     Config cfg;
+    cfg.equalizerIterations = 3;
     cfg.numerology = 3;
     cfg.frequencyRange = FR2;
     cfg.channelBandwidthMHz = 100;
@@ -666,6 +832,7 @@ int main()
   {
     // 100 MHz FR1 mu 2 captured with 150 MSa/s (Marlin EVM task rate): downsampling to 122.88 MSa/s
     Config cfg;
+    cfg.equalizerIterations = 3;
     cfg.numerology = 2;
     cfg.frequencyRange = FR1;
     cfg.channelBandwidthMHz = 100;
@@ -677,6 +844,7 @@ int main()
   std::printf("carrier offset and DFT-s-OFDM\n");
   {
     Config cfg;
+    cfg.equalizerIterations = 3;
     cfg.numerology = 1;
     cfg.fftSize = 1024;
     cfg.sampleRate = 1024 * 30e3;
@@ -697,6 +865,7 @@ int main()
   std::printf("per symbol tracking (TrackTiming / TrackAmplitude / TrackPhase)\n");
   {
     Config cfg;
+    cfg.equalizerIterations = 3;
     cfg.numerology = 1;
     cfg.fftSize = 2048;
     cfg.sampleRate = 2048 * 30e3;
@@ -731,6 +900,7 @@ int main()
   std::printf("burst search (5GNRBurstMode): idle time before and after the transmission\n");
   {
     Config cfg;
+    cfg.equalizerIterations = 3;
     cfg.numerology = 2;
     cfg.fftSize = 2048;
     cfg.sampleRate = 2048 * 60e3;
@@ -775,6 +945,7 @@ int main()
   std::printf("I/Q impairments, DC offset, common phase error statistics\n");
   {
     Config cfg;
+    cfg.equalizerIterations = 3;
     cfg.numerology = 1;
     cfg.fftSize = 1024;
     cfg.sampleRate = 1024 * 30e3;
@@ -839,6 +1010,7 @@ int main()
   std::printf("mirrored spectrum, extended CP, DM-RS variants, multi slot\n");
   {
     Config cfg;
+    cfg.equalizerIterations = 3;
     cfg.numerology = 1;
     cfg.fftSize = 1024;
     cfg.sampleRate = 1024 * 30e3;

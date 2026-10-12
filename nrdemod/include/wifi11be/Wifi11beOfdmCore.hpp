@@ -3,7 +3,7 @@
  ****************************************************************************
  *
  * Native IEEE 802.11be (EHT, Extremely High Throughput, Wi-Fi 7) OFDM
- * demodulator core - burst/sync/CFO scope only.
+ * demodulator core with burst/sync/CFO and explicitly configured DATA EVM.
  *
  * Pure C++ / STL, mirrors wifi11ax/Wifi11axOfdmCore.hpp. An EHT PPDU starts
  * with the exact same Legacy-STF/Legacy-LTF/L-SIG fields as 802.11a/n/ac/ax
@@ -14,16 +14,13 @@
  * is likewise replicated on every 20 MHz subchannel of a wider EHT PPDU,
  * verified against real 320 MHz TDC captures at 400 Msps).
  *
- * Scope: ONLY the independently-verified legacy burst/L-LTF-sync/CFO result
- * is produced. EHT-SIG/U-SIG (MRU allocation, MCS, 320 MHz/16x16 MU-MIMO
- * signaling, puncturing pattern) and the EHT-LTF/DATA field (1x/2x/4x LTF,
- * 0.8/1.6/3.2us GI, up to 4096-point FFT at 320 MHz) are NOT decoded by
- * this core at all - EHT's MRU/puncturing structure is an even larger
- * decode problem than HE's OFDMA resource-unit structure, and is
- * intentionally left out of scope rather than guessed at. mcsIndex/
- * bandwidthMHz/numDataSymbols/EVM are therefore not produced; only burst/
- * sync/frequency-error (independently verified via L-LTF channel self-
- * consistency, same as every other native WiFi core here) are reported.
+ * Optional DATA EVM supports 20 MHz, one spatial stream, a full RU242,
+ * 4x EHT-LTF and MCS0-13. Training and DATA FFT offsets are supplied in
+ * 20 MSa/s samples relative to PPDU start; GI is 16, 32 or 64 samples.
+ * EHT-LTF estimates each tone independently of DATA. Pilot phase tracking
+ * and nearest-constellation DATA decisions produce RMS EVM as a ratio.
+ * EHT-SIG/U-SIG decoding, wider DATA bandwidths, MRU/puncturing, multiple
+ * spatial streams and 1x/2x LTF remain unsupported. Sync-only use is unchanged.
  *
  * Copyright by Advantest Europe GmbH
  *
@@ -42,6 +39,16 @@ struct Config {
   double burstSearchThresholdDb; // power threshold below the peak, dB
   double syncThreshold;          // minimum L-LTF channel-consistency confidence (0..1) to declare sync
 
+  bool measureDataEvm;
+  int dataBandwidthMHz;
+  int numSpatialStreams;
+  int ehtLtfType;
+  int dataMcs;
+  int ehtLtfFftOffsetSamples;
+  int dataFftOffsetSamples;
+  int dataGuardIntervalSamples;
+  int numDataSymbols;
+
   Config();
 };
 
@@ -59,9 +66,16 @@ struct Result {
 
   double frequencyErrorHz; // carrier frequency offset from the two L-LTF copies' residual phase
 
+  bool dataEvmValid;
+  std::string dataError;
+  double evmRmsData;
+  int numDataSymbols;
+
   Result();
 };
 
 Result demodulate(const std::vector<std::complex<double> >& iq, const Config& config);
 
+void measureDataEvm(const std::vector<std::complex<double>>& iq, double ppduStartSamples, const Config& config,
+    Result& result);
 }

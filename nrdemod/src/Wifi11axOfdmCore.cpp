@@ -342,6 +342,17 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
   result.frequencyErrorHz = residualPhase * (20.0e6) / (TWO_PI * FFT_SIZE);
 
   result.ok = true;
+  if (config.dataConfig.measureDataEvm) {
+    wifi11bedemod::Config dataConfig = config.dataConfig;
+    dataConfig.sampleRate = config.sampleRate;
+    result.dataResult.syncFound = result.syncFound;
+    result.dataResult.frequencyErrorHz = result.frequencyErrorHz;
+    if (dataConfig.dataMcs < 0 || dataConfig.dataMcs > 11) {
+      result.dataResult.dataError = "HE DATA MCS must be between 0 and 11";
+    } else {
+      wifi11bedemod::measureDataEvm(iq, static_cast<double>(bestPos - 192) * osr, dataConfig, result.dataResult);
+    }
+  }
   return result;
 }
 
