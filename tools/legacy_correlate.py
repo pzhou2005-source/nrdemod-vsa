@@ -32,8 +32,8 @@ _ROOT = os.path.normpath(os.path.join(_HERE, ".."))
 _PLAIN = os.path.join(_ROOT, "captures", "tdc_reference_plaintext")
 _REF = os.path.join(_ROOT, "captures", "tdc_reference")
 _OUT = os.path.join(_ROOT, "reports")
-_SIGNALS = r"C:\Program Files\Keysight\89600 Software 2026_U2\89600 VSA Software\Help\Signals"
-_VSA_EXE = r"C:\Program Files\Keysight\89600 Software 2026_U2\89600 VSA Software\Agilent.SA.Vsa.Vector-x64.exe"
+_SIGNALS = r"C:\Program Files\Keysight\89600 Software 2023\89600 VSA Software\Help\Signals"
+_VSA_EXE = r"C:\Program Files\Keysight\89600 Software 2023\89600 VSA Software\Agilent.SA.Vsa.Vector-x64.exe"
 
 _DEMOD_OFDM, _DEMOD_DSSS, _DEMOD_OFDM11N, _DEMOD_DIGITAL = 5, 6, 13, 2
 BLUETOOTH = ("BluetoothBdr", "BluetoothEdr", "BluetoothLe1M", "BluetoothLe2M", "BluetoothLeCodedS8")
@@ -45,7 +45,7 @@ FAMILIES = {
     "802.11b": {"demod": _DEMOD_DSSS},
     "802.11n": {"demod": _DEMOD_OFDM11N},
     "802.11ac": {"demod": _DEMOD_OFDM11N},
-    "802.15.4z_HrpUwb": {"setx": os.path.join(_SIGNALS, "HrpUwb", "HrpUwb_Ch9_Code10_L4_Sync64_Sfd8_33octet.setx")},
+    "802.15.4z_HrpUwb": {"setx": os.path.join(_SIGNALS, "HrpUwb", "HrpUwb_Ch1_Code2_L64_Sync64_Sfd8.setx")},
     "NbIotDl": {"setx": os.path.join(_SIGNALS, "NBIoT", "NBIoT_DL_StandAlone.setx")},
     "NbIotUl": {"setx": os.path.join(_SIGNALS, "NBIoT", "NBIoT_UL_NPUSCH_1T_2RU_2Rep.setx")},
     **{d: {"demod": _DEMOD_DIGITAL} for d in BLUETOOTH},
@@ -263,19 +263,26 @@ def measure(link, vsa, family, stem, mat, duration, state) -> dict:
     cfg = FAMILIES[family]
     meas.Frequency.Points = 801  # a stale long time record trips "recording is not long enough" on any later change
     if "setx" in cfg:
+        # recall the recording before the setup: recalling a setx first leaves the Recording input unable to
+        # RecallFile (COMError "Cannot close the file. Disk is probably full.", regardless of retries) until the
+        # VSA is restarted. Loading the (small, padded) recording first and letting the setx follow is reliable.
+        print("  loading recording", flush=True)
+        vsa.load_recording(mat)
         if state.get("family") != family:
             setx = patch_setx(family, stem, cfg["setx"])
             print(f"  recalling {os.path.basename(setx)}", flush=True)
             meas.RecallFile(setx)
             meas.Frequency.Points = 801  # the setup brings its own long time record, too long for our recording
+            print("  reloading recording after setx recall", flush=True)
+            vsa.load_recording(mat)  # the setx recall resets Inputs, so the recording has to be reapplied
     else:
         # RecallFile of a recording blocks after a finished measurement unless the demod is re-selected
         meas.DemodConfig = 0
         meas.DemodConfig = cfg["demod"]
+        print("  loading recording", flush=True)
+        vsa.load_recording(mat)
     state["family"] = family
     apply_demod_settings(meas, family, stem)
-    print("  loading recording", flush=True)
-    vsa.load_recording(mat)
     span = float(meas.Frequency.Span)
     target = 1.28 * span * duration * 1.05
     for _ in range(60):
@@ -419,12 +426,18 @@ def main(argv=None) -> int:
 
 
 def restart_vsa(timeout_s: int = 240) -> None:
-    """Kills and relaunches the 89600 and waits until its COM object is registered."""
+    """Kills and relaunches the 89600 and waits until its COM object is registered.
+
+    The app always pops a blocking 'Looking for hardware error' dialog on launch (there is no
+    physical analyser attached on this bench), so dismiss_error_dialogs() has to run throughout
+    the wait, not just once a measurement is in flight.
+    """
     subprocess.run(["taskkill", "/F", "/IM", os.path.basename(_VSA_EXE)], capture_output=True)
     subprocess.Popen([_VSA_EXE])
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        time.sleep(5)
+        time.sleep(2)
+        dismiss_error_dialogs()
         try:
             VsaCom().open()
             return
@@ -434,7 +447,8 @@ def restart_vsa(timeout_s: int = 240) -> None:
 
 
 def dismiss_error_dialogs() -> None:
-    """Closes the modal 'Keysight 89600 VSA : Error' boxes that otherwise block every COM call."""
+    """Closes the modal dialogs that otherwise block every COM call: the 'VSA : Error' boxes and
+    the 'Looking for hardware error' dialog the app always raises on launch (no analyser attached)."""
     import ctypes
     from ctypes import wintypes
 
@@ -444,7 +458,8 @@ def dismiss_error_dialogs() -> None:
     def visit(hwnd, _):
         buf = ctypes.create_unicode_buffer(256)
         user32.GetWindowTextW(hwnd, buf, 256)
-        if user32.IsWindowVisible(hwnd) and buf.value.endswith("VSA : Error"):
+        title = buf.value
+        if user32.IsWindowVisible(hwnd) and ("VSA : Error" in title or "Looking for hardware" in title):
             user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
         return True
 

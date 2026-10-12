@@ -57,8 +57,9 @@
     },
     {
       "label": "7. Generate waveforms with Octave (sparklink)",
-      "type": "shell",
+      "type": "process",
       "command": "octave-cli",
+      "windows": { "command": "${env:LOCALAPPDATA}/Programs/GNU Octave/Octave-11.3.0/mingw64/bin/octave-cli.exe" },
       "args": ["--eval", "generate_all_waveforms([], {'sparklink'})"],
       "options": { "cwd": "${workspaceFolder}/tools" },
       "problemMatcher": []

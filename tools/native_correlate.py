@@ -1,8 +1,9 @@
-"""Correlate the new native WiFi / Bluetooth LE / UWB demodulators (nrdemod.demod) with the 89600 VSA.
+"""Correlate the native WiFi / Bluetooth / UWB / NB-IoT demodulators (nrdemod.demod, nrdemod) with the 89600 VSA.
 
 The VSA side is read from reports/legacy_correlation.csv (produced by legacy_correlate.py), the native side is
-run here on the same plaintext waveforms. Families without a native core (NB-IoT, LTE/eMTC,
-Bluetooth BDR/EDR/LR) are listed as unsupported.
+run here on the same plaintext waveforms. NB-IoT reuses the 5G NR CP-OFDM core (nrdemod, not nrdemod.demod) with
+a 1-RB/15 kHz-numerology config - see nrdemod/README.md. Families without a native core (LTE/eMTC, Bluetooth LR)
+are listed as unsupported.
 
     python tools/native_correlate.py --list
     python tools/native_correlate.py                       # everything, writes reports/native_correlation.csv
@@ -29,6 +30,7 @@ sys.path.insert(0, _HERE)
 os.environ.setdefault("DEMOD_LIBRARY", os.path.join(_ROOT, "nrdemod", "python", "nrdemod", "_lib", "demod.dll"))
 
 import legacy_correlate as L  # noqa: E402  (parsing helpers shared with the VSA batch)
+import nrdemod  # noqa: E402  (5G NR CP-OFDM core, reused for NB-IoT - see nrdemod/README.md)
 from nrdemod import demod  # noqa: E402
 
 _VSA_CSV = os.path.join(_ROOT, "reports", "legacy_correlation.csv")
@@ -37,8 +39,6 @@ DEV_TOL_PCT = 5.0
 FREQ_TOL_HZ = 100.0
 BT_FREQ_TOL_HZ = 300.0  # the VSA's own FskCarrOffs scatters by up to ~220 Hz on these ideal bursts
 NO_NATIVE = {
-    "NbIotDl": "no native NB-IoT core",
-    "NbIotUl": "no native NB-IoT core",
     "LteFddDl": "no verified 89600 LTE personality mapping (see legacy_correlate.py)",
     "LteFddUl": "no verified 89600 LTE personality mapping (see legacy_correlate.py)",
     "LteTddUl": "no verified 89600 LTE personality mapping (see legacy_correlate.py)",
@@ -47,6 +47,8 @@ NO_NATIVE = {
 FAMILY_ID = {"802.11a": demod.WIFI_A, "802.11b": demod.WIFI_B, "802.11n": demod.WIFI_N, "802.11ac": demod.WIFI_AC,
              "BluetoothLe1M": demod.BT_LE, "BluetoothLe2M": demod.BT_LE, "BluetoothBdr": demod.BT_LE,
              "BluetoothEdr": demod.BT_LE, "BluetoothLeCodedS8": demod.BT_LE, "802.15.4z_HrpUwb": demod.UWB_HRP}
+# NB-IoT dispatches to the nrdemod (5G NR) module instead of FAMILY_ID/demod, see correlate_one().
+NBIOT_FAMILIES = ("NbIotDl", "NbIotUl")
 
 
 def _vsa_rows() -> dict:
@@ -93,8 +95,35 @@ def correlate_one(family, stem, wav, vsa) -> dict:
     vall = json.loads(vsa["vsa_all"]) if vsa and vsa.get("vsa_all") else {}
     vsa_evm = _num(vsa.get("vsa_EvmRms")) if vsa else None
     vsa_freq = _num(vsa.get("vsa_FrequencyError")) if vsa else None
-    fid = FAMILY_ID[family]
     row["status"] = "ok"
+
+    if family in NBIOT_FAMILIES:
+        # 1 resource block, 15 kHz SCS (numerology 0), single-tone NPUSCH/NPDSCH is always QPSK -
+        # see nrdemod/README.md "NB-IoT downlink/uplink" and nrdemod/examples/selftest.py.
+        # carrierOffsetHz=7500: NB-IoT standalone sits on a half-subcarrier-shifted raster
+        # relative to the LTE grid these TDC captures were generated against; without it the
+        # core's own CFO estimate settles on -7500 Hz and EVM is unusably high.
+        cfg = nrdemod.Config(numerology=0, frequencyRange=nrdemod.FR1, channelBandwidthMHz=0,
+                              numResourceBlocks=1, resourceBlockOffset=0, transformPrecoding=False,
+                              resample=True, sampleRate=fs, modulation=nrdemod.QPSK, carrierOffsetHz=7500.0)
+        res = nrdemod.demodulate(iq, cfg)
+        if not res.ok:
+            row.update(status="error", note=res.error)
+            row["pass"] = None
+            return row
+        row.update(native_info=f"mod={res.modulation_name} symbols={res.numSymbols}",
+                   native_FreqErr=res.frequencyErrorHz)
+        _evm_compare(row, res.rmsEvmPercent, vsa_evm, True)
+        if row.get("pass") is False and res.rmsEvmPercent > 10:
+            # EVM stays >>1% even after the raster-offset fix on these real captures (the
+            # core's own selftest, a synthetic signal round-tripped through itself, reads ~0%);
+            # likely an NPDSCH/NPUSCH resource-element mapping (NRS position, tone index)
+            # the generic 1-RB PDSCH/PUSCH config doesn't fully replicate. Flagged, not silently
+            # passed - see the native_dev_hz=... fields for the raw numbers.
+            row["note"] = "EVM >>1%% even with CFO fixed; likely NPDSCH/NPUSCH RE-mapping mismatch, needs DSP review"
+        return row
+
+    fid = FAMILY_ID[family]
 
     if family == "802.11a":
         res, d = _run(fid, iq, fs)
