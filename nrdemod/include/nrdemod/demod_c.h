@@ -97,6 +97,21 @@ typedef struct DemodConfig {
 /** Opaque demodulation result, tagged internally with the DemodFamily it came from. */
 typedef struct DemodResult DemodResult;
 
+typedef struct DemodWifiBeDataConfig {
+  int dataBandwidthMHz;
+  int numSpatialStreams;
+  int ehtLtfType;
+  int dataMcs;
+  int ehtLtfFftOffsetSamples;
+  int dataFftOffsetSamples;
+  int dataGuardIntervalSamples;
+  int numDataSymbols;
+} DemodWifiBeDataConfig;
+
+DEMOD_API DemodResult* DEMOD_CALL demod_wifi_be_data(const float* iq, size_t numSamples,
+    const DemodConfig* cfg, const DemodWifiBeDataConfig* dataCfg);
+DEMOD_API const char* DEMOD_CALL demod_result_data_error(const DemodResult* r);
+
 DEMOD_API const char* DEMOD_CALL demod_version(void);
 DEMOD_API int         DEMOD_CALL demod_abi_version(void);
 

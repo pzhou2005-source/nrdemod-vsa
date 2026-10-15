@@ -33,6 +33,7 @@ struct DemodResult {
   int family;
   bool ok;
   std::string error;
+  std::string dataError;
 
   /* Scalars, tagged by name across every family (unused ones stay at their
      default). Simpler than one struct per family since callers only read
@@ -42,6 +43,7 @@ struct DemodResult {
     bool syncFound;
     bool syncWordFound;
     bool isCckDataRate;
+    bool dataEvmValid;
   } b;
   struct {
     int burstStart;
@@ -76,6 +78,7 @@ struct DemodResult {
     double deltaFMinHz;
     double samplesPerSymbol;
     double preambleSymbolPeriodSamples;
+    double evmRmsData;
   } d;
 
   std::vector<double> frequencyDeviationHz;
@@ -254,6 +257,10 @@ DemodResult* fromWifiBe(const wifi11bedemod::Result& r)
   out->i.timingOffsetSamples = r.timingOffsetSamples;
   out->d.syncRho = r.syncRho;
   out->d.frequencyErrorHz = r.frequencyErrorHz;
+  out->b.dataEvmValid = r.dataEvmValid;
+  out->dataError = r.dataError;
+  out->d.evmRmsData = r.evmRmsData;
+  out->i.numDataSymbols = r.numDataSymbols;
   return out;
 }
 
@@ -374,6 +381,39 @@ DemodResult* run(int family, const std::complex<float>* iqf, size_t numSamples, 
 
 extern "C" {
 
+DemodResult* DEMOD_CALL demod_wifi_be_data(const float* samples, size_t numSamples,
+    const DemodConfig* input, const DemodWifiBeDataConfig* data)
+{
+  if (!input || !data || (!samples && numSamples)) return fail(DEMOD_WIFI_BE, "null argument");
+  if (input->abiVersion != DEMOD_ABI_VERSION) return fail(DEMOD_WIFI_BE, "DemodConfig ABI version mismatch");
+  try {
+    wifi11bedemod::Config cfg;
+    fillCommon(cfg, input);
+    cfg.measureDataEvm = true;
+    cfg.dataBandwidthMHz = data->dataBandwidthMHz;
+    cfg.numSpatialStreams = data->numSpatialStreams;
+    cfg.ehtLtfType = data->ehtLtfType;
+    cfg.dataMcs = data->dataMcs;
+    cfg.ehtLtfFftOffsetSamples = data->ehtLtfFftOffsetSamples;
+    cfg.dataFftOffsetSamples = data->dataFftOffsetSamples;
+    cfg.dataGuardIntervalSamples = data->dataGuardIntervalSamples;
+    cfg.numDataSymbols = data->numDataSymbols;
+    std::vector<std::complex<double>> iq(numSamples);
+    for (size_t index = 0; index < numSamples; ++index)
+      iq[index] = std::complex<double>(samples[2 * index], samples[2 * index + 1]);
+    return fromWifiBe(wifi11bedemod::demodulate(iq, cfg));
+  } catch (const std::exception& error) {
+    return fail(DEMOD_WIFI_BE, error.what());
+  } catch (...) {
+    return fail(DEMOD_WIFI_BE, "unknown exception");
+  }
+}
+
+const char* DEMOD_CALL demod_result_data_error(const DemodResult* result)
+{
+  return result ? result->dataError.c_str() : "null result";
+}
+
 const char* DEMOD_CALL demod_version(void) { return DEMOD_VERSION_STRING; }
 int DEMOD_CALL demod_abi_version(void) { return DEMOD_ABI_VERSION; }
 
@@ -456,6 +496,7 @@ int DEMOD_CALL demod_result_get_bool(const DemodResult* r, const char* name, int
   if (r == 0 || name == 0 || out == 0) return DEMOD_ERR_NULL_ARG;
 #define PICK(f) if (std::strcmp(name, #f) == 0) { *out = r->b.f ? 1 : 0; return DEMOD_OK; }
   PICK(burstFound) PICK(syncFound) PICK(syncWordFound) PICK(isCckDataRate)
+  PICK(dataEvmValid)
 #undef PICK
   return DEMOD_ERR_UNKNOWN_KEY;
 }
@@ -476,6 +517,11 @@ int DEMOD_CALL demod_result_get_int(const DemodResult* r, const char* name, int*
 int DEMOD_CALL demod_result_get_double(const DemodResult* r, const char* name, double* out)
 {
   if (r == 0 || name == 0 || out == 0) return DEMOD_ERR_NULL_ARG;
+  if (std::strcmp(name, "evmRmsData") == 0) {
+    if (!r->b.dataEvmValid) return DEMOD_ERR_FAILED;
+    *out = r->d.evmRmsData;
+    return DEMOD_OK;
+  }
 #define PICK(f) if (std::strcmp(name, #f) == 0) { *out = r->d.f; return DEMOD_OK; }
   PICK(syncRho) PICK(frequencyErrorHz) PICK(rmsEvmPercent) PICK(peakEvmPercent)
   PICK(dataRmsEvmPercent) PICK(dataPeakEvmPercent) PICK(syncWordRho) PICK(deltaFAvgHz)
@@ -534,6 +580,7 @@ const char* DEMOD_CALL demod_field_names(int family, int kind)
         case DEMOD_WIFI_AD: return boolFieldsAd;
         case DEMOD_WIFI_B: return boolFieldsB;
         case DEMOD_BT_LE: return boolFieldsBt;
+        case DEMOD_WIFI_BE: return "burstFound\0syncFound\0dataEvmValid\0";
         default: return boolFieldsCommon;
       }
     case 1: /* int */
@@ -547,8 +594,8 @@ const char* DEMOD_CALL demod_field_names(int family, int kind)
         case DEMOD_WIFI_AC: return "burstStart\0burstLength\0timingOffsetSamples\0mcsIndex\0modulation\0"
                                     "codingRateNumerator\0codingRateDenominator\0bandwidthMHz\0nsts\0"
                                     "numDataSymbols\0peakEvmSymbolIndex\0peakEvmSubcarrierIndex\0";
-        case DEMOD_WIFI_AX:
-        case DEMOD_WIFI_BE: return "burstStart\0burstLength\0timingOffsetSamples\0";
+        case DEMOD_WIFI_AX: return "burstStart\0burstLength\0timingOffsetSamples\0";
+        case DEMOD_WIFI_BE: return "burstStart\0burstLength\0timingOffsetSamples\0numDataSymbols\0";
         case DEMOD_WIFI_AD: return "burstStart\0burstLength\0";
         case DEMOD_WIFI_B: return "burstStart\0burstLength\0timingOffsetSamples\0"
                                    "numSyncSymbolsMeasured\0numDataSymbolsMeasured\0";
@@ -561,8 +608,8 @@ const char* DEMOD_CALL demod_field_names(int family, int kind)
         case DEMOD_WIFI_A:
         case DEMOD_WIFI_N:
         case DEMOD_WIFI_AC: return "syncRho\0frequencyErrorHz\0rmsEvmPercent\0peakEvmPercent\0";
-        case DEMOD_WIFI_AX:
-        case DEMOD_WIFI_BE: return "syncRho\0frequencyErrorHz\0";
+        case DEMOD_WIFI_AX: return "syncRho\0frequencyErrorHz\0";
+        case DEMOD_WIFI_BE: return "syncRho\0frequencyErrorHz\0evmRmsData\0";
         case DEMOD_WIFI_AD: return "\0";
         case DEMOD_WIFI_B: return "syncRho\0frequencyErrorHz\0rmsEvmPercent\0peakEvmPercent\0"
                                    "dataRmsEvmPercent\0dataPeakEvmPercent\0";

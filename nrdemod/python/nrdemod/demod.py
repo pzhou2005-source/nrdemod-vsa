@@ -24,6 +24,7 @@ from ._demod_ffi import DemodConfig, lib
 
 __all__ = [
     "Config",
+    "WifiBeDataConfig",
     "Result",
     "demodulate",
     "version",
@@ -111,12 +112,14 @@ class Config:
 class Result:
     """Demodulation output. Scalars are attributes, vectors are numpy arrays."""
 
-    __slots__ = ("_scalars", "_vectors", "ok", "error", "family")
+    __slots__ = ("_scalars", "_vectors", "ok", "error", "family", "dataError")
 
     def __init__(self, family: int, handle):
         self.family = family
         self.ok = bool(lib.demod_result_ok(handle))
         self.error = lib.demod_result_error(handle).decode("utf-8", "replace")
+        self.dataError = (lib.demod_result_data_error(handle).decode("utf-8", "replace")
+                  if hasattr(lib, "demod_result_data_error") else "")
         self._scalars: Dict[str, object] = {}
         self._vectors: Dict[str, np.ndarray] = {}
 
@@ -172,6 +175,8 @@ class Result:
         out = dict(self._scalars)
         out["ok"] = self.ok
         out["error"] = self.error
+        if self.family == WIFI_BE:
+            out["dataError"] = self.dataError
         out["family"] = _FAMILY_NAMES.get(self.family, "?")
         if include_vectors:
             out.update(self._vectors)
@@ -194,11 +199,30 @@ def _as_interleaved(iq) -> np.ndarray:
     return a
 
 
-def demodulate(family: int, iq, config: Optional[Config] = None, **overrides) -> Result:
+@dataclass
+class WifiBeDataConfig:
+    """Explicit RU242 DATA layout; FFT offsets use 20 MSa/s samples from PPDU start."""
+
+    dataBandwidthMHz: int = 20
+    numSpatialStreams: int = 1
+    ehtLtfType: int = 4
+    dataMcs: int = 7
+    ehtLtfFftOffsetSamples: int = 864
+    dataFftOffsetSamples: int = 1184
+    dataGuardIntervalSamples: int = 64
+    numDataSymbols: int = 4
+
+
+def demodulate(family: int, iq, config: Optional[Config] = None,
+               *, data_config: Optional[WifiBeDataConfig] = None, **overrides) -> Result:
     """Demodulates a complex baseband capture with the given family's native core.
 
     ``family`` is one of the module-level constants (WIFI_A, WIFI_N, ...).
     ``iq`` may be a complex numpy array or an interleaved real array.
+    ``data_config`` enables the explicit-layout WIFI_BE DATA measurement.
+    Check ``dataEvmValid`` before reading ``evmRmsData`` (a ratio, not percent);
+    invalid EVM is absent and ``dataError`` describes the DATA failure.
+    This path does not decode EHT signaling or recover payload bits.
     """
     cfg = Config() if config is None else config
     if overrides:
@@ -209,7 +233,15 @@ def demodulate(family: int, iq, config: Optional[Config] = None, **overrides) ->
     raw = cfg._to_c(family)
 
     ptr = flat.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) if num_samples else None
-    handle = lib.demod_demodulate(family, ptr, num_samples, ctypes.byref(raw))
+    if data_config is not None:
+        if family != WIFI_BE:
+            raise ValueError("data_config is supported only for WIFI_BE")
+        if not hasattr(lib, "demod_wifi_be_data"):
+            raise RuntimeError("Rebuild the demod library to enable Wi-Fi 7 DATA EVM")
+        data_raw = _ffi.WifiBeDataConfig(**data_config.__dict__)
+        handle = lib.demod_wifi_be_data(ptr, num_samples, ctypes.byref(raw), ctypes.byref(data_raw))
+    else:
+        handle = lib.demod_demodulate(family, ptr, num_samples, ctypes.byref(raw))
     if not handle:
         raise RuntimeError("demod_demodulate returned NULL")
     try:

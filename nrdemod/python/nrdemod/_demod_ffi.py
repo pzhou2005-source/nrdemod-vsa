@@ -39,6 +39,13 @@ class DemodConfig(ctypes.Structure):
 
 _ResultPtr = ctypes.c_void_p
 
+class WifiBeDataConfig(ctypes.Structure):
+    _fields_ = [(name, c_int) for name in (
+        "dataBandwidthMHz", "numSpatialStreams", "ehtLtfType", "dataMcs",
+        "ehtLtfFftOffsetSamples", "dataFftOffsetSamples",
+        "dataGuardIntervalSamples", "numDataSymbols",
+    )]
+
 
 def _search_paths() -> list:
     here = os.path.dirname(os.path.abspath(__file__))
@@ -92,6 +99,14 @@ lib.demod_result_ok.restype = c_int
 
 lib.demod_result_error.argtypes = [_ResultPtr]
 lib.demod_result_error.restype = c_char_p
+
+if hasattr(lib, "demod_wifi_be_data"):
+    lib.demod_wifi_be_data.argtypes = [
+        POINTER(c_float), c_size_t, POINTER(DemodConfig), POINTER(WifiBeDataConfig)
+    ]
+    lib.demod_wifi_be_data.restype = _ResultPtr
+    lib.demod_result_data_error.argtypes = [_ResultPtr]
+    lib.demod_result_data_error.restype = c_char_p
 
 lib.demod_result_get_bool.argtypes = [_ResultPtr, c_char_p, POINTER(c_int)]
 lib.demod_result_get_bool.restype = c_int
