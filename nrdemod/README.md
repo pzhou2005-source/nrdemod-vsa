@@ -181,8 +181,143 @@ The native mode values are `UWB_BPRF=0`, `UWB_HPRF=1`, and `UWB_EHPRF=2`;
 they are not the waveform sidecar/VSA mode numbers. C callers use
 `DEMOD_UWB_BPRF`, `DEMOD_UWB_HPRF`, or `DEMOD_UWB_EHPRF` in `DemodConfig.phyMode`.
 EHPRF uses the periodic preamble receiver at the configured chip/sample rates.
-It does not decode dynamic PHR, BCC/LDPC, STS, or PSDU payloads. ABI version 1
-and the existing configuration layout are unchanged.
+That synchronization-only entry point does not decode frame fields. Use the
+frame API below for dynamic PHR, BCC/LDPC, keyed STS and PSDU decoding.
+ABI version 1 and the existing common configuration layout are unchanged.
+
+### Native UWB Frame Decoding
+
+The additive `demodulate_uwb_frame` API recovers SFD timing, keyed STS
+correlation, SECDED-protected PHR bits, and decoded PSDU bytes. It does not
+consume generator field boundaries or `PayloadHex`:
+
+```python
+from nrdemod import demod
+from nrdemod.vsa import load_iq
+
+iq, fs = load_iq("captures/generated/uwb/UWB_4a_ch9_CI3_PRF15M6_6M81_PSDU100.txt")
+cfg = demod.Config(sampleRate=fs, syncLength=64)
+frame = demod.demodulate_uwb_frame(iq, cfg, demod.UwbFrameConfig())
+if not frame.ok:
+  raise RuntimeError(frame.error)
+if frame.psduValid:
+  payload = bytes(int(value) for value in frame.psduBytes)
+  print(payload.hex(), frame.rsCorrectedSymbols)
+```
+
+Frame decoding includes all 32 standardized preamble tables, short/long
+legacy SFD and ERDEV SFD0-4, legacy 0.11/0.85/1.7/6.81/27.24 Mbps
+rate/PRF-dependent layouts, and integer 2-16 samples/chip. Applicable
+code/rate/SFD combinations depend on the PHY. BPRF uses 6.81 Mbps,
+up to 127 payload bytes, and one 64-unit STS segment; its AES
+implementation uses Windows CNG (`bcrypt`), so non-Windows builds reject
+STS requests. For BPRF SP1 use `legacy=False`, `codeIndex=10`,
+`stsPacketConfig=1`, and `highRatePhr=True` for the bundled ch5 recording.
+SP3 contains STS only: `ok=True` does not imply PHR or PSDU validity.
+
+`stsKeyHex` and `stsIvHex` defaults are public fixture values, not secure
+production credentials. Supply the actual session settings for real signals.
+STS correlation is not secure-ranging authentication or certification.
+The API also returns individual validity flags, PHR bits, and field offsets
+and lengths in zero-based input samples, aligned to the acquired pulse
+lattice (including receive-filter delay, not generator impulse boundaries).
+The existing burst/preamble/CFO API is unchanged. `legacyRateMbps` selects
+long-SFD/110-kbps acquisition; other legacy rates are decoded from PHR.
+Set `legacyMeanPrfMHz` to 3.9, 15.6 or 62.4 and optionally override
+`preambleSpread` (zero selects the normal code/PRF-dependent value).
+`legacyVsaHopping=True` reconstructs the bundled compatibility recording;
+set it to `False` for unmodified MATLAB legacy hopping.
+
+HPRF frame decoding supports preamble codes 25-32, SFD0-4, PRF124.8/249.6 MHz,
+K3 with shortened RS or K7 with separately terminated PHR/PSDU and no RS,
+12-bit decoded lengths (up to 4095 bytes), and 1-4 STS segments.
+Each segment must pass keyed correlation; `stsRho` is the minimum segment
+correlation. `stsSegmentLength` accepts 16/32/64/128/256 units of 512 chips.
+SP2 supports `extraStsGapLength` (0-127 units of four chips) and
+`extraStsGapIndex` (0-3, checked against PHR where applicable).
+Example for the bundled
+code-27 recording:
+
+```python
+iq, fs = load_iq("captures/generated/uwb/UWB_4z_HPRF_ch5_CI27_124M8_PSDU100.txt")
+cfg = demod.Config(sampleRate=fs, phyMode=demod.UWB_HPRF, syncLength=32)
+options = demod.UwbFrameConfig(
+  legacy=False, codeIndex=27, sfdIndex=1, stsPacketConfig=1,
+  meanPrfMHz=124.8, constraintLength=7, numStsSegments=2,
+)
+frame = demod.demodulate_uwb_frame(iq, cfg, options)
+assert frame.ok, frame.error
+```
+
+Use code25/PRF249.6/K3/one STS segment for the bundled 127-byte HPRF case.
+All new fields extend `DemodUwbFrameConfig` at the end; the DLL accepts
+both previous 48-byte and 64-byte Win64 layouts with their original defaults.
+The current Win64 structure is 120 bytes; common `DemodConfig` stays unchanged.
+
+#### Draft EHPRF, FCS, and Native EVM
+
+EHPRF supports dynamic PHR1 rate/coding detection, CRC-8-protected PHR2,
+K7 BCC or shortened rate-1/2 QC-LDPC (648/1296/1944-bit blocks), and
+on-air rates 1.95/7.8/31.2/62.4/124.8 Mbps. With `dynamicPhr=False`,
+`bitRateMbps` selects static-PHR rates, including older 6.8/27.2 modes.
+This implements the draft format used by the installed reference generator,
+not a claim of compliance with every revision of IEEE 802.15.4ab.
+
+```python
+iq, fs = load_iq("captures/generated/uwb/UWB_4ab_EHPRF_ch5_7M8_LDPC_PSDU127.txt")
+cfg = demod.Config(sampleRate=fs, chipRateHz=fs / 4, phyMode=demod.UWB_EHPRF)
+options = demod.UwbFrameConfig(legacy=False, codeIndex=25, stsPacketConfig=1)
+frame = demod.demodulate_uwb_frame(iq, cfg, options)
+assert frame.ok and frame.phr1Valid and frame.ldpcCoding
+print(frame.bitRateMbps, frame.psduEvmRmsPercent)
+```
+
+`macFcsLength=0` explicitly skips MAC checking (generated PSDUs contain
+random bytes). Set it to 2 for CRC-16/KERMIT or 4 for reflected CRC-32/ISO-HDLC,
+with little-endian appended FCS bytes. Inspect `macFcsChecked` and
+`macFcsValid`; failed FCS makes `ok=False` without erasing successful PHY
+decoding (`psduValid`). `ldpcCorrectedBits` and `rsCorrectedSymbols` report
+their respective FEC corrections.
+
+Native `shrEvmRmsPercent`, `stsEvmRmsPercent`, `phrEvmRmsPercent` and
+`psduEvmRmsPercent` require `evmValid` and the corresponding stage flag.
+The receiver re-encodes corrected PHR/PSDU bits, reconstructs pulse signs,
+and fits a complex 33-tap chip-spaced FIR using the first 16 SYNC symbols.
+It measures interior chip-lattice residual power relative to reference
+power, excluding up to 33 chips at each field edge (at most one quarter
+of a short field). Gain/phase are not refitted to the payload. It assumes
+a stationary pulse/channel response; it is neither all-sample waveform EVM
+nor validated as equivalent to 89600 NRMSE. Absent-field metrics stay zero
+and must not be read as successful measurements.
+
+LDPC uses MIT-licensed `tavildar/LDPC`, pinned at
+`05ee7f4af36ed5dacf52861315af68b8a17e71e0`, in `third_party/ldpc` with its
+license retained. Its half-rate matrices match the reference EHPRF tables;
+native code handles EHPRF shortening, block distribution and parity checks.
+The decoder currently uses hard-decision-derived LLRs, not a calibrated
+soft-channel noise estimate.
+
+Rebuild the shared library and restart an existing Python/notebook kernel
+before using the new entry point. The UWB notebook plots native-decoded
+fields and compares payload references only after decoding. On Windows,
+`ctest --test-dir build -R Uwb --output-on-failure` also runs bundled capture
+regressions when recordings are present: byte-exact legacy/BPRF SP0/SP1,
+STS-only SP3, both HPRF K3/K7 captures, all three EHPRF BCC/LDPC captures,
++25 kHz CFO, wrong-key/truncation/SFD/missing-segment rejection, K7 and LDPC
+error recovery, RS-symbol errors (one/four corrected, tested five-error
+pattern rejected), CRC known vectors, and clean/10%-amplitude-error EVM.
+
+Independent expanded-settings regression, with MATLAB required only for
+reference generation, writes ignored binary vectors under the build tree:
+
+```text
+matlab -batch "addpath('tests'); generate_uwb_frame_vectors('build/frame-tests/vectors')"
+python tests/UwbFrameApiTest.py
+```
+
+Run from `nrdemod`. This checks 77 generated frames, all 32 preamble tables,
+LDPC shortening boundaries, STS lengths/gaps, SFDs, legacy and EHPRF rates,
+valid MAC FCS frames, native EVM, and both previous C option layouts.
 
 Family constants: `WIFI_A`, `WIFI_N`, `WIFI_AC`, `WIFI_AX`, `WIFI_AD`, `WIFI_B`,
 `WIFI_BE`, `BT_LE`, `UWB_HRP`. Each core's scope is documented in its header

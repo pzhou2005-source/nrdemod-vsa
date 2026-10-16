@@ -158,8 +158,15 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
   // IEEE 802.15.4z HRP ternary preamble codes range roughly 16..1024 chips (BPRF uses shorter
   // codes, HPRF substantially longer); search that range in samples rather than assuming one
   // literal code length, so this works across BPRF/HPRF variants without a hard-coded table.
-  const int minLagSamples = std::max(1, static_cast<int>(std::llround(16 * samplesPerChip)));
-  const int maxLagSamples = static_cast<int>(std::llround(1024 * samplesPerChip));
+  if (config.preamblePeriodChips < 0 || config.preamblePeriodChips > 8192) {
+    result.error = "invalid configured preamble period";
+    return result;
+  }
+  const int expectedLag = static_cast<int>(std::llround(config.preamblePeriodChips * samplesPerChip));
+  const int minLagSamples = config.preamblePeriodChips ? std::max(1, expectedLag - 1) :
+    std::max(1, static_cast<int>(std::llround(16 * samplesPerChip)));
+  const int maxLagSamples = config.preamblePeriodChips ? expectedLag + 1 :
+    static_cast<int>(std::llround(1024 * samplesPerChip));
 
   // Precompute |iq|^2 and a running sum-of-squares (energy prefix sum) ONCE, not per-lag - see
   // periodicEnergyCorrelation()'s comment for why this is the dominant cost of this function.

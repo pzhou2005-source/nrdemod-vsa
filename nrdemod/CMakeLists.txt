@@ -67,6 +67,7 @@ add_library(demod SHARED
   src/Wifi11beOfdmCore.cpp
   src/BtGfskCore.cpp
   src/UwbHrpCore.cpp
+  src/UwbFrameCore.cpp
   src/demod_c.cpp
 )
 
@@ -76,6 +77,10 @@ target_include_directories(demod PUBLIC
 )
 
 target_compile_definitions(demod PRIVATE NRDEMOD_BUILD_SHARED)
+
+if(WIN32)
+  target_link_libraries(demod PRIVATE bcrypt)
+endif()
 
 set_target_properties(demod PROPERTIES
   OUTPUT_NAME demod
@@ -128,6 +133,12 @@ if(NRDEMOD_BUILD_TESTS)
     list(GET pair 0 testName)
     list(GET pair 1 coreName)
     add_executable(${testName} tests/${testName}.cpp src/${coreName}.cpp)
+    if(testName STREQUAL "UwbHrpCoreTest")
+      target_sources(${testName} PRIVATE src/UwbFrameCore.cpp)
+      if(WIN32)
+        target_link_libraries(${testName} PRIVATE bcrypt)
+      endif()
+    endif()
     if(testName STREQUAL "Wifi11axOfdmCoreTest")
       target_sources(${testName} PRIVATE src/Wifi11beOfdmCore.cpp)
     endif()
@@ -141,6 +152,10 @@ if(NRDEMOD_BUILD_TESTS)
     endif()
     add_test(NAME ${testName} COMMAND ${testName})
   endforeach()
+  if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../captures/generated/uwb/UWB_4a_ch9_CI3_PRF15M6_6M81_PSDU100.txt")
+    add_test(NAME UwbFrameCaptureTest COMMAND UwbHrpCoreTest
+      "${CMAKE_CURRENT_SOURCE_DIR}/../captures/generated/uwb")
+  endif()
 endif()
 
 install(TARGETS nrdemod demod

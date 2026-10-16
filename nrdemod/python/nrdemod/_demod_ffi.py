@@ -39,6 +39,18 @@ class DemodConfig(ctypes.Structure):
 
 _ResultPtr = ctypes.c_void_p
 
+
+class UwbFrameConfig(ctypes.Structure):
+    _fields_ = [(name, c_int) for name in (
+        "structSize", "codeIndex", "sfdIndex", "stsPacketConfig",
+        "samplesPerPulse", "legacy", "highRatePhr",
+        )] + [("stsKeyHex", c_char_p), ("stsIvHex", c_char_p),
+            ("constraintLength", c_int), ("numStsSegments", c_int), ("meanPrfMHz", c_double),
+            ("dynamicPhr", c_int), ("bitRateMbps", c_double), ("stsSegmentLength", c_int),
+            ("extraStsGapLength", c_int), ("macFcsLength", c_int), ("extraStsGapIndex", c_int),
+            ("legacyRateMbps", c_double), ("legacyMeanPrfMHz", c_double),
+            ("preambleSpread", c_int), ("legacyVsaHopping", c_int)]
+
 class WifiBeDataConfig(ctypes.Structure):
     _fields_ = [(name, c_int) for name in (
         "dataBandwidthMHz", "numSpatialStreams", "ehtLtfType", "dataMcs",
@@ -90,6 +102,12 @@ lib.demod_demodulate.restype = _ResultPtr
 
 lib.demod_demodulate64.argtypes = [c_int, POINTER(c_double), c_size_t, POINTER(DemodConfig)]
 lib.demod_demodulate64.restype = _ResultPtr
+
+if hasattr(lib, "demod_uwb_frame"):
+    lib.demod_uwb_frame.argtypes = [
+        POINTER(c_float), c_size_t, POINTER(DemodConfig), POINTER(UwbFrameConfig)
+    ]
+    lib.demod_uwb_frame.restype = _ResultPtr
 
 lib.demod_result_free.argtypes = [_ResultPtr]
 lib.demod_result_free.restype = None

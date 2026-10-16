@@ -83,6 +83,8 @@ struct DemodResult {
 
   std::vector<double> frequencyDeviationHz;
   std::vector<int> accessAddressBits;
+  bool frameAttempted = false;
+  uwbdemod::FrameResult uwbFrame;
 };
 
 namespace {
@@ -381,6 +383,67 @@ DemodResult* run(int family, const std::complex<float>* iqf, size_t numSamples, 
 
 extern "C" {
 
+DemodResult* DEMOD_CALL demod_uwb_frame(const float* samples, size_t numSamples,
+    const DemodConfig* input, const DemodUwbFrameConfig* frame)
+{
+  if (!input || !frame || (!samples && numSamples)) return fail(DEMOD_UWB_HRP, "null argument");
+  if (input->abiVersion != DEMOD_ABI_VERSION ||
+      (frame->structSize != sizeof(DemodUwbFrameConfig) &&
+        frame->structSize != offsetof(DemodUwbFrameConfig, dynamicPhr) &&
+       frame->structSize != offsetof(DemodUwbFrameConfig, constraintLength)))
+    return fail(DEMOD_UWB_HRP, "UWB frame configuration ABI mismatch");
+  if (numSamples > 40000000) return fail(DEMOD_UWB_HRP, "capture exceeds native frame size limit");
+  try {
+    uwbdemod::Config cfg;
+    fillCommon(cfg, input);
+    cfg.phyMode = input->phyMode;
+    cfg.syncLength = input->syncLength;
+    cfg.chipRateHz = input->chipRateHz;
+    uwbdemod::FrameConfig settings;
+    settings.codeIndex = frame->codeIndex;
+    settings.sfdIndex = frame->sfdIndex;
+    settings.stsPacketConfig = frame->stsPacketConfig;
+    settings.samplesPerPulse = frame->samplesPerPulse;
+    settings.legacy = frame->legacy != 0;
+    settings.highRatePhr = frame->highRatePhr != 0;
+    if (frame->stsKeyHex) settings.stsKeyHex = frame->stsKeyHex;
+    if (frame->stsIvHex) settings.stsIvHex = frame->stsIvHex;
+    if (frame->structSize >= static_cast<int>(offsetof(DemodUwbFrameConfig, dynamicPhr))) {
+      settings.constraintLength = frame->constraintLength;
+      settings.numStsSegments = frame->numStsSegments;
+      settings.meanPrfMHz = frame->meanPrfMHz;
+    }
+    if (frame->structSize == sizeof(DemodUwbFrameConfig)) {
+      settings.dynamicPhr = frame->dynamicPhr != 0;
+      settings.bitRateMbps = frame->bitRateMbps;
+      settings.stsSegmentLength = frame->stsSegmentLength;
+      settings.extraStsGapLength = frame->extraStsGapLength;
+      settings.macFcsLength = frame->macFcsLength;
+      settings.extraStsGapIndex = frame->extraStsGapIndex;
+      settings.legacyRateMbps = frame->legacyRateMbps;
+      settings.legacyMeanPrfMHz = frame->legacyMeanPrfMHz;
+      settings.preambleSpread = frame->preambleSpread;
+      settings.legacyVsaHopping = frame->legacyVsaHopping != 0;
+    }
+    std::vector<std::complex<double>> iq(numSamples);
+    for (size_t index = 0; index < numSamples; ++index)
+      iq[index] = {samples[2 * index], samples[2 * index + 1]};
+    const auto decoded = uwbdemod::demodulateFrame(iq, cfg, settings);
+    DemodResult* out = fromUwb(decoded.acquisition);
+    if (!out) return nullptr;
+    out->frameAttempted = true;
+    out->uwbFrame = decoded;
+    out->ok = decoded.ok;
+    out->error = decoded.error;
+    out->i.psduLengthBytes = decoded.psduLengthBytes;
+    return out;
+  } catch (const std::exception& error) {
+    return fail(DEMOD_UWB_HRP, error.what());
+  } catch (...) {
+    return fail(DEMOD_UWB_HRP, "unknown UWB frame exception");
+  }
+}
+
 DemodResult* DEMOD_CALL demod_wifi_be_data(const float* samples, size_t numSamples,
     const DemodConfig* input, const DemodWifiBeDataConfig* data)
 {
@@ -494,6 +557,16 @@ const char* DEMOD_CALL demod_result_error(const DemodResult* r)
 int DEMOD_CALL demod_result_get_bool(const DemodResult* r, const char* name, int* out)
 {
   if (r == 0 || name == 0 || out == 0) return DEMOD_ERR_NULL_ARG;
+  if (r->family == DEMOD_UWB_HRP && std::strcmp(name, "frameAttempted") == 0) {
+    *out = r->frameAttempted;
+    return DEMOD_OK;
+  }
+  if (r->frameAttempted) {
+#define FRAME_BOOL(field) if (std::strcmp(name, #field) == 0) { *out = r->uwbFrame.field; return DEMOD_OK; }
+    FRAME_BOOL(sfdFound) FRAME_BOOL(stsPresent) FRAME_BOOL(stsValid) FRAME_BOOL(phrValid) FRAME_BOOL(psduValid)
+    FRAME_BOOL(phr1Valid) FRAME_BOOL(ldpcCoding) FRAME_BOOL(macFcsChecked) FRAME_BOOL(macFcsValid) FRAME_BOOL(evmValid)
+#undef FRAME_BOOL
+  }
 #define PICK(f) if (std::strcmp(name, #f) == 0) { *out = r->b.f ? 1 : 0; return DEMOD_OK; }
   PICK(burstFound) PICK(syncFound) PICK(syncWordFound) PICK(isCckDataRate)
   PICK(dataEvmValid)
@@ -504,6 +577,13 @@ int DEMOD_CALL demod_result_get_bool(const DemodResult* r, const char* name, int
 int DEMOD_CALL demod_result_get_int(const DemodResult* r, const char* name, int* out)
 {
   if (r == 0 || name == 0 || out == 0) return DEMOD_ERR_NULL_ARG;
+  if (r->frameAttempted) {
+#define FRAME_INT(field) if (std::strcmp(name, #field) == 0) { *out = r->uwbFrame.field; return DEMOD_OK; }
+    FRAME_INT(syncStart) FRAME_INT(sfdStart) FRAME_INT(sfdLength) FRAME_INT(stsStart) FRAME_INT(stsLength)
+    FRAME_INT(phrStart) FRAME_INT(phrLength) FRAME_INT(psduStart) FRAME_INT(psduLength) FRAME_INT(rsCorrectedSymbols)
+    FRAME_INT(phr2Start) FRAME_INT(phr2Length) FRAME_INT(ldpcCorrectedBits)
+#undef FRAME_INT
+  }
 #define PICK(f) if (std::strcmp(name, #f) == 0) { *out = r->i.f; return DEMOD_OK; }
   PICK(burstStart) PICK(burstLength) PICK(timingOffsetSamples) PICK(syncPositionSamples)
   PICK(modulation) PICK(mcsIndex) PICK(codingRateNumerator) PICK(codingRateDenominator)
@@ -517,6 +597,13 @@ int DEMOD_CALL demod_result_get_int(const DemodResult* r, const char* name, int*
 int DEMOD_CALL demod_result_get_double(const DemodResult* r, const char* name, double* out)
 {
   if (r == 0 || name == 0 || out == 0) return DEMOD_ERR_NULL_ARG;
+  if (r->frameAttempted) {
+#define FRAME_DOUBLE(field) if (std::strcmp(name, #field) == 0) { *out = r->uwbFrame.field; return DEMOD_OK; }
+    FRAME_DOUBLE(sfdRho) FRAME_DOUBLE(stsRho) FRAME_DOUBLE(bitRateMbps)
+    FRAME_DOUBLE(shrEvmRmsPercent) FRAME_DOUBLE(stsEvmRmsPercent)
+    FRAME_DOUBLE(phrEvmRmsPercent) FRAME_DOUBLE(psduEvmRmsPercent)
+#undef FRAME_DOUBLE
+  }
   if (std::strcmp(name, "evmRmsData") == 0) {
     if (!r->b.dataEvmValid) return DEMOD_ERR_FAILED;
     *out = r->d.evmRmsData;
@@ -553,6 +640,8 @@ int DEMOD_CALL demod_result_vector_copy(const DemodResult* r, const char* name, 
 long DEMOD_CALL demod_result_ivector_size(const DemodResult* r, const char* name)
 {
   if (r == 0 || name == 0) return DEMOD_ERR_NULL_ARG;
+  if (r->frameAttempted && std::strcmp(name, "psduBytes") == 0) return static_cast<long>(r->uwbFrame.psduBytes.size());
+  if (r->frameAttempted && std::strcmp(name, "phrBits") == 0) return static_cast<long>(r->uwbFrame.phrBits.size());
   if (std::strcmp(name, "accessAddressBits") == 0) return static_cast<long>(r->accessAddressBits.size());
   return DEMOD_ERR_UNKNOWN_KEY;
 }
@@ -560,6 +649,12 @@ long DEMOD_CALL demod_result_ivector_size(const DemodResult* r, const char* name
 int DEMOD_CALL demod_result_ivector_copy(const DemodResult* r, const char* name, int* dst, size_t count)
 {
   if (r == 0 || name == 0 || dst == 0) return DEMOD_ERR_NULL_ARG;
+  if (r->frameAttempted && (std::strcmp(name, "psduBytes") == 0 || std::strcmp(name, "phrBits") == 0)) {
+    const auto& values = std::strcmp(name, "psduBytes") == 0 ? r->uwbFrame.psduBytes : r->uwbFrame.phrBits;
+    if (count < values.size()) return DEMOD_ERR_SIZE;
+    if (!values.empty()) std::memcpy(dst, values.data(), values.size() * sizeof(int));
+    return DEMOD_OK;
+  }
   if (std::strcmp(name, "accessAddressBits") != 0) return DEMOD_ERR_UNKNOWN_KEY;
   if (count < r->accessAddressBits.size()) return DEMOD_ERR_SIZE;
   if (!r->accessAddressBits.empty())
@@ -581,6 +676,8 @@ const char* DEMOD_CALL demod_field_names(int family, int kind)
         case DEMOD_WIFI_B: return boolFieldsB;
         case DEMOD_BT_LE: return boolFieldsBt;
         case DEMOD_WIFI_BE: return "burstFound\0syncFound\0dataEvmValid\0";
+        case DEMOD_UWB_HRP: return "burstFound\0syncFound\0frameAttempted\0sfdFound\0stsPresent\0stsValid\0phrValid\0psduValid\0"
+          "phr1Valid\0ldpcCoding\0macFcsChecked\0macFcsValid\0evmValid\0";
         default: return boolFieldsCommon;
       }
     case 1: /* int */
@@ -600,7 +697,9 @@ const char* DEMOD_CALL demod_field_names(int family, int kind)
         case DEMOD_WIFI_B: return "burstStart\0burstLength\0timingOffsetSamples\0"
                                    "numSyncSymbolsMeasured\0numDataSymbolsMeasured\0";
         case DEMOD_BT_LE: return "burstStart\0burstLength\0syncPositionSamples\0symbolTimingPhase\0";
-        case DEMOD_UWB_HRP: return "burstStart\0burstLength\0syncPositionSamples\0";
+        case DEMOD_UWB_HRP: return "burstStart\0burstLength\0syncPositionSamples\0syncStart\0sfdStart\0sfdLength\0"
+          "stsStart\0stsLength\0phrStart\0phrLength\0psduStart\0psduLength\0psduLengthBytes\0rsCorrectedSymbols\0"
+          "phr2Start\0phr2Length\0ldpcCorrectedBits\0";
         default: return "\0";
       }
     case 2: /* double */
@@ -615,12 +714,14 @@ const char* DEMOD_CALL demod_field_names(int family, int kind)
                                    "dataRmsEvmPercent\0dataPeakEvmPercent\0";
         case DEMOD_BT_LE: return "syncWordRho\0frequencyErrorHz\0deltaFAvgHz\0deltaFMaxHz\0"
                                   "deltaFMinHz\0samplesPerSymbol\0";
-        case DEMOD_UWB_HRP: return "syncRho\0frequencyErrorHz\0preambleSymbolPeriodSamples\0";
+        case DEMOD_UWB_HRP: return "syncRho\0frequencyErrorHz\0preambleSymbolPeriodSamples\0sfdRho\0stsRho\0bitRateMbps\0"
+          "shrEvmRmsPercent\0stsEvmRmsPercent\0phrEvmRmsPercent\0psduEvmRmsPercent\0";
         default: return "\0";
       }
     case 3: /* vector<double> */
       return (family == DEMOD_BT_LE) ? "frequencyDeviationHz\0" : "\0";
     case 4: /* vector<int> */
+      if (family == DEMOD_UWB_HRP) return "phrBits\0psduBytes\0";
       return (family == DEMOD_BT_LE) ? "accessAddressBits\0" : "\0";
     default:
       return "\0";

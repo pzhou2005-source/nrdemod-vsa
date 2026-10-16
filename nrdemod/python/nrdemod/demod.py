@@ -25,8 +25,10 @@ from ._demod_ffi import DemodConfig, lib
 __all__ = [
     "Config",
     "WifiBeDataConfig",
+    "UwbFrameConfig",
     "Result",
     "demodulate",
+    "demodulate_uwb_frame",
     "version",
     "WIFI_A",
     "WIFI_N",
@@ -221,6 +223,70 @@ class WifiBeDataConfig:
     dataFftOffsetSamples: int = 1184
     dataGuardIntervalSamples: int = 64
     numDataSymbols: int = 4
+
+
+@dataclass
+class UwbFrameConfig:
+    """Legacy/BPRF/HPRF/EHPRF frame settings; no payload reference.
+
+    STS key/IV defaults are public test-vector values, not production keys.
+    Frame positions follow the acquired pulse lattice, including filter delay.
+    STS correlation is a waveform check, not a secure-ranging certification.
+    Dynamic EHPRF headers signal rate and BCC/LDPC selection on the air.
+    macFcsLength is 0 (not checked), 2 (CRC-16), or 4 (CRC-32).
+    Native EVM uses a SYNC-trained pulse model on the chip lattice; it is
+    not an assertion of equivalence to VSA's EVM measurement.
+    """
+
+    codeIndex: int = 3
+    sfdIndex: int = 0
+    stsPacketConfig: int = 0
+    samplesPerPulse: int = 4
+    legacy: bool = True
+    highRatePhr: bool = False
+    stsKeyHex: str = "4A5572BC90798C8E518D2449092F1B55"
+    stsIvHex: str = "68DEBD3A599939DD57FDBB0E2A10FAC0"
+    constraintLength: int = 3
+    numStsSegments: int = 1
+    meanPrfMHz: float = 249.6
+    dynamicPhr: bool = True
+    bitRateMbps: float = 27.2
+    stsSegmentLength: int = 64
+    extraStsGapLength: int = 0
+    macFcsLength: int = 0
+    extraStsGapIndex: int = 0
+    legacyRateMbps: float = 6.81
+    legacyMeanPrfMHz: float = 15.6
+    preambleSpread: int = 0
+    legacyVsaHopping: bool = True
+
+
+def demodulate_uwb_frame(iq, config: Config, frame_config: UwbFrameConfig) -> Result:
+    """Recover native SFD/STS/PHR/PSDU results; check stage validity flags.
+
+    Payload length is decoded from PHR. No PayloadHex or field offsets are
+    passed to the native receiver. Optional MAC FCS rejection is separate
+    from psduValid (PHY decoding). stsRho is the minimum normalized keyed
+    correlation across all STS segments. Inspect evmValid and stage flags
+    before reading native field EVM, which is reported in percent.
+    """
+    if not hasattr(lib, "demod_uwb_frame"):
+        raise RuntimeError("Rebuild demod.dll and restart the kernel to enable native UWB frames")
+    flat = _as_interleaved(iq)
+    raw = config._to_c(UWB_HRP)
+    settings = frame_config.__dict__.copy()
+    settings["stsKeyHex"] = frame_config.stsKeyHex.encode("ascii")
+    settings["stsIvHex"] = frame_config.stsIvHex.encode("ascii")
+    frame_raw = _ffi.UwbFrameConfig(structSize=ctypes.sizeof(_ffi.UwbFrameConfig), **settings)
+    count = flat.size // 2
+    pointer = flat.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) if count else None
+    handle = lib.demod_uwb_frame(pointer, count, ctypes.byref(raw), ctypes.byref(frame_raw))
+    if not handle:
+        raise RuntimeError("native UWB frame decoder returned NULL")
+    try:
+        return Result(UWB_HRP, handle)
+    finally:
+        lib.demod_result_free(handle)
 
 
 def demodulate(family: int, iq, config: Optional[Config] = None,

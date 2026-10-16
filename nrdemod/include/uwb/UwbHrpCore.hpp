@@ -24,12 +24,20 @@
  *      under magnitude-squared combining, leaving only the carrier
  *      rotation, the same trick the GFSK core's F0 estimator uses).
  *
- * Does not decode PHR/PSDU payload bits (ternary-code correlation,
- * Reed-Solomon/convolutional FEC and scrambling are protocol-layer
- * concerns well beyond PHY burst/sync accuracy) - deliberately scoped the
- * same way as the native Bluetooth LE core (BurstFound/SyncRho/
- * FrequencyError, matching the subset of the legacy Bebop library's own
- * RESULT set that are pure modulation-accuracy quantities).
+ * demodulate() retains the burst/preamble/CFO scope above.
+ * demodulateFrame() additionally acquires SFD, correlates keyed STS,
+ * decodes SECDED or EHPRF dynamic PHR, and recovers PSDU bytes with
+ * K3/RS, separately terminated K7, or shortened rate-1/2 QC-LDPC.
+ * Includes preamble tables 1-32, SFD0-4 and legacy long SFD, legacy
+ * rate/PRF-dependent modulation, HPRF and draft EHPRF modulation,
+ * 1-4 individually checked STS segments of 16/32/64/128/256 units,
+ * and configured SP2 extra gaps. Invalid PHY combinations reject.
+ * STS AES uses Windows CNG; non-Windows builds reject STS requests.
+ * Optional MAC FCS checking is separate from PHY decoding validity.
+ * Native EVM uses post-FEC re-encoding and a SYNC-trained 33-tap FIR
+ * on the chip lattice, excluding bounded field-edge transients.
+ * This is not VSA-equivalent EVM or an IEEE conformance certificate.
+ * Offsets follow the acquired pulse lattice, including filter delay.
  *
  * Copyright by Advantest Europe GmbH
  *
@@ -56,6 +64,7 @@ struct Config {
   bool   burstSearch;            // search for the burst in the capture
   double burstSearchThresholdDb; // power threshold below the peak, dB
   double syncThreshold;          // minimum normalized autocorrelation to declare sync, 0..1
+  int preamblePeriodChips = 0;
 
   Config();
 };
@@ -79,5 +88,74 @@ struct Result {
 };
 
 Result demodulate(const std::vector<std::complex<double> >& iq, const Config& config);
+
+struct FrameConfig {
+  int codeIndex = 3;
+  int sfdIndex = 0;
+  int stsPacketConfig = 0;
+  int samplesPerPulse = 4;
+  bool legacy = true;
+  bool highRatePhr = false;
+  int constraintLength = 3;
+  int numStsSegments = 1;
+  double meanPrfMHz = 249.6;
+  bool dynamicPhr = true;
+  double bitRateMbps = 27.2;
+  double legacyRateMbps = 6.81;
+  double legacyMeanPrfMHz = 15.6;
+  int preambleSpread = 0;
+  int extraStsGapIndex = 0;
+  bool legacyVsaHopping = true;
+  int stsSegmentLength = 64;
+  int extraStsGapLength = 0;
+  int macFcsLength = 0;
+  std::string stsKeyHex = "4A5572BC90798C8E518D2449092F1B55";
+  std::string stsIvHex = "68DEBD3A599939DD57FDBB0E2A10FAC0";
+};
+
+struct FrameResult {
+  bool ok = false;
+  std::string error;
+  Result acquisition;
+  bool sfdFound = false;
+  bool stsPresent = false;
+  bool stsValid = false;
+  bool phrValid = false;
+  bool psduValid = false;
+  bool phr1Valid = false;
+  bool ldpcCoding = false;
+  bool macFcsChecked = false;
+  bool macFcsValid = false;
+  double bitRateMbps = 0;
+  int ldpcCorrectedBits = 0;
+  int phr2Start = -1;
+  int phr2Length = 0;
+  bool evmValid = false;
+  double shrEvmRmsPercent = 0;
+  double stsEvmRmsPercent = 0;
+  double phrEvmRmsPercent = 0;
+  double psduEvmRmsPercent = 0;
+  int syncStart = -1;
+  int sfdStart = -1;
+  int sfdLength = 0;
+  int stsStart = -1;
+  int stsLength = 0;
+  int phrStart = -1;
+  int phrLength = 0;
+  int psduStart = -1;
+  int psduLength = 0;
+  int psduLengthBytes = 0;
+  int rsCorrectedSymbols = 0;
+  double sfdRho = 0.0;
+  double stsRho = 0.0;
+  double frequencyErrorHz = 0.0;
+  std::vector<int> phrBits;
+  std::vector<int> psduBytes;
+};
+
+FrameResult demodulateFrame(const std::vector<std::complex<double> >& iq,
+    const Config& config, const FrameConfig& frameConfig);
+
+bool validateMacFcs(const std::vector<int>& psduBytes, int fcsLength);
 
 }

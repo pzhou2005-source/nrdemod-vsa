@@ -104,6 +104,34 @@ typedef struct DemodConfig {
 /** Opaque demodulation result, tagged internally with the DemodFamily it came from. */
 typedef struct DemodResult DemodResult;
 
+typedef struct DemodUwbFrameConfig {
+  int structSize;
+  int codeIndex;
+  int sfdIndex;
+  int stsPacketConfig;
+  int samplesPerPulse;
+  int legacy;
+  int highRatePhr;
+  const char* stsKeyHex;
+  const char* stsIvHex;
+  int constraintLength;
+  int numStsSegments;
+  double meanPrfMHz;
+  int dynamicPhr;
+  double bitRateMbps;
+  int stsSegmentLength;
+  int extraStsGapLength;
+  int macFcsLength;
+  int extraStsGapIndex;
+  double legacyRateMbps;
+  double legacyMeanPrfMHz;
+  int preambleSpread;
+  int legacyVsaHopping;
+} DemodUwbFrameConfig;
+
+DEMOD_API DemodResult* DEMOD_CALL demod_uwb_frame(const float* iq, size_t numSamples,
+    const DemodConfig* cfg, const DemodUwbFrameConfig* frameCfg);
+
 typedef struct DemodWifiBeDataConfig {
   int dataBandwidthMHz;
   int numSpatialStreams;

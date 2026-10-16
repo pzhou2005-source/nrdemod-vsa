@@ -1,14 +1,16 @@
 {
-  "timestamp_utc": "2026-10-16T11:07:56.148017+00:00",
+  "timestamp_utc": "2026-10-16T13:32:40.220767+00:00",
   "capture": "captures/generated/uwb/UWB_4a_ch9_CI3_PRF15M6_6M81_PSDU100.txt",
   "capture_sha256": "1396c8f5cbb6c45e8d51c46d05d718294303fddcdae9b942f7bb7d55add63027",
   "native_version": "1.0.0",
   "native_metrics": {
     "burstFound": true,
     "syncFound": true,
+    "frameAttempted": false,
     "burstStart": 4060,
     "burstLength": 429428,
     "syncPositionSamples": 4060,
+    "psduLengthBytes": 0,
     "syncRho": 0.9913648089237391,
     "frequencyErrorHz": -0.0,
     "preambleSymbolPeriodSamples": 1984.0,
@@ -22,6 +24,224 @@
     "sampleRate": 1996800000.0,
     "chipRateHz": 499200000.0
   },
+  "native_frame_metrics": {
+    "burstFound": true,
+    "syncFound": true,
+    "frameAttempted": true,
+    "sfdFound": true,
+    "stsPresent": false,
+    "stsValid": false,
+    "phrValid": true,
+    "psduValid": true,
+    "phr1Valid": false,
+    "ldpcCoding": false,
+    "macFcsChecked": false,
+    "macFcsValid": false,
+    "evmValid": true,
+    "burstStart": 4060,
+    "burstLength": 429428,
+    "syncPositionSamples": 4060,
+    "syncStart": 3998,
+    "sfdStart": 130974,
+    "sfdLength": 15872,
+    "stsStart": -1,
+    "stsLength": 0,
+    "phrStart": 146846,
+    "phrLength": 43008,
+    "psduStart": 189854,
+    "psduLength": 241664,
+    "psduLengthBytes": 100,
+    "rsCorrectedSymbols": 0,
+    "phr2Start": 146846,
+    "phr2Length": 43008,
+    "ldpcCorrectedBits": 0,
+    "syncRho": 0.9913648089237391,
+    "frequencyErrorHz": -0.0,
+    "preambleSymbolPeriodSamples": 1984.0,
+    "sfdRho": 1.0,
+    "stsRho": 0.0,
+    "bitRateMbps": 6.81,
+    "shrEvmRmsPercent": 9.615487720507529e-07,
+    "stsEvmRmsPercent": 0.0,
+    "phrEvmRmsPercent": 2.6696789428650634e-06,
+    "psduEvmRmsPercent": 1.3329872653148303e-06,
+    "ok": true,
+    "error": "",
+    "family": "UWB-HRP"
+  },
+  "native_frame_checks": [
+    {
+      "capture": "UWB_4a_ch9_CI3_PRF15M6_6M81_PSDU100.txt",
+      "mode": "802.15.4A",
+      "coding": "BCC",
+      "constraint_length": 3,
+      "sts_segments": 1,
+      "decoded_bytes": 100,
+      "sts_valid": false,
+      "mac_fcs_checked": false,
+      "mac_fcs_valid": false,
+      "ldpc_corrected_bits": 0,
+      "native_evm_percent": {
+        "shr": 9.615487720507529e-07,
+        "sts": 0.0,
+        "phr": 2.6696789428650634e-06,
+        "psdu": 1.3329872653148303e-06
+      },
+      "passed": true
+    },
+    {
+      "capture": "UWB_4ab_EHPRF_ch5_7M8_LDPC_PSDU127.txt",
+      "mode": "EHPRF",
+      "coding": "LDPC",
+      "constraint_length": 7,
+      "sts_segments": 1,
+      "decoded_bytes": 127,
+      "sts_valid": true,
+      "mac_fcs_checked": false,
+      "mac_fcs_valid": false,
+      "ldpc_corrected_bits": 0,
+      "native_evm_percent": {
+        "shr": 1.7509858266965185e-06,
+        "sts": 1.7812001102235339e-06,
+        "phr": 1.8442612275490153e-06,
+        "psdu": 1.8594733507240794e-06
+      },
+      "passed": true
+    },
+    {
+      "capture": "UWB_4ab_EHPRF_ch9_124M8_LDPC_PSDU1024.txt",
+      "mode": "EHPRF",
+      "coding": "LDPC",
+      "constraint_length": 7,
+      "sts_segments": 1,
+      "decoded_bytes": 1024,
+      "sts_valid": true,
+      "mac_fcs_checked": false,
+      "mac_fcs_valid": false,
+      "ldpc_corrected_bits": 0,
+      "native_evm_percent": {
+        "shr": 1.7509858266965185e-06,
+        "sts": 1.7812001102235339e-06,
+        "phr": 1.8537552390921308e-06,
+        "psdu": 1.856802843305928e-06
+      },
+      "passed": true
+    },
+    {
+      "capture": "UWB_4ab_EHPRF_ch9_62M4_BCC_PSDU256.txt",
+      "mode": "EHPRF",
+      "coding": "BCC",
+      "constraint_length": 7,
+      "sts_segments": 1,
+      "decoded_bytes": 256,
+      "sts_valid": true,
+      "mac_fcs_checked": false,
+      "mac_fcs_valid": false,
+      "ldpc_corrected_bits": 0,
+      "native_evm_percent": {
+        "shr": 1.8927425056224812e-06,
+        "sts": 1.913732806008398e-06,
+        "phr": 2.2239805067388186e-06,
+        "psdu": 2.152650753682475e-06
+      },
+      "passed": true
+    },
+    {
+      "capture": "UWB_4z_BPRF_ch5_CI10_SP1_PSDU127.txt",
+      "mode": "BPRF",
+      "coding": "BCC",
+      "constraint_length": 3,
+      "sts_segments": 1,
+      "decoded_bytes": 127,
+      "sts_valid": true,
+      "mac_fcs_checked": false,
+      "mac_fcs_valid": false,
+      "ldpc_corrected_bits": 0,
+      "native_evm_percent": {
+        "shr": 2.227548207351514e-06,
+        "sts": 2.1197147080444614e-06,
+        "phr": 2.4509726417202627e-06,
+        "psdu": 2.4566038214156133e-06
+      },
+      "passed": true
+    },
+    {
+      "capture": "UWB_4z_BPRF_ch9_CI11_SP3.txt",
+      "mode": "BPRF",
+      "coding": "BCC",
+      "constraint_length": 3,
+      "sts_segments": 1,
+      "decoded_bytes": 0,
+      "sts_valid": true,
+      "mac_fcs_checked": false,
+      "mac_fcs_valid": false,
+      "ldpc_corrected_bits": 0,
+      "native_evm_percent": {
+        "shr": 1.6289546279427505e-06,
+        "sts": 1.6898432742159944e-06,
+        "phr": 0.0,
+        "psdu": 0.0
+      },
+      "passed": true
+    },
+    {
+      "capture": "UWB_4z_BPRF_ch9_CI9_SP0_PSDU127.txt",
+      "mode": "BPRF",
+      "coding": "BCC",
+      "constraint_length": 3,
+      "sts_segments": 1,
+      "decoded_bytes": 127,
+      "sts_valid": false,
+      "mac_fcs_checked": false,
+      "mac_fcs_valid": false,
+      "ldpc_corrected_bits": 0,
+      "native_evm_percent": {
+        "shr": 1.5718560861923193e-06,
+        "sts": 0.0,
+        "phr": 2.372899370046783e-06,
+        "psdu": 2.413526120570827e-06
+      },
+      "passed": true
+    },
+    {
+      "capture": "UWB_4z_HPRF_ch5_CI27_124M8_PSDU100.txt",
+      "mode": "HPRF",
+      "coding": "BCC",
+      "constraint_length": 7,
+      "sts_segments": 2,
+      "decoded_bytes": 100,
+      "sts_valid": true,
+      "mac_fcs_checked": false,
+      "mac_fcs_valid": false,
+      "ldpc_corrected_bits": 0,
+      "native_evm_percent": {
+        "shr": 1.6972678783398088e-06,
+        "sts": 1.9089233745196873e-06,
+        "phr": 1.8657445992898448e-06,
+        "psdu": 1.9437119002700634e-06
+      },
+      "passed": true
+    },
+    {
+      "capture": "UWB_4z_HPRF_ch9_CI25_249M6_PSDU127.txt",
+      "mode": "HPRF",
+      "coding": "BCC",
+      "constraint_length": 3,
+      "sts_segments": 1,
+      "decoded_bytes": 127,
+      "sts_valid": true,
+      "mac_fcs_checked": false,
+      "mac_fcs_valid": false,
+      "ldpc_corrected_bits": 0,
+      "native_evm_percent": {
+        "shr": 1.5832628156140955e-06,
+        "sts": 1.066971889055591e-06,
+        "phr": 2.3576174094579437e-06,
+        "psdu": 2.4262402658103903e-06
+      },
+      "passed": true
+    }
+  ],
   "legacy_hopping_convention": "VsaTrailingPnWindow",
   "native_checks": {
     "reference_sync": true,
@@ -81,5 +301,5 @@
     "vsa_psdu_nrmse_percent": 8.429747566651713e-06,
     "vsa_psdu_nrmse_ratio": 8.429747566651713e-08
   },
-  "limitations": "Native core exposes burst/preamble/CFO only; no native PHR/PSDU EVM or payload decoding."
+  "limitations": "Native legacy/BPRF/HPRF/EHPRF frames, optional MAC CRC-16/CRC-32 and chip-lattice EVM are implemented. Native EVM is not VSA-equivalent NRMSE. Random fixture PSDUs leave MAC FCS checking disabled. EHPRF follows the reference draft format; this VSA release has no EHPRF mode."
 }
