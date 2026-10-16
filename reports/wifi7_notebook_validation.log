@@ -1,0 +1,14 @@
+﻿Native demodulator 1.0.0
+{'source': 'Synthetic DATA/EVM regression fixture (not an EHT packet)', 'samples': 2500, 'sample_rate_hz': 20000000.0, 'execution_ms': 1.4466000138781965, 'burstFound': True, 'syncFound': True, 'dataEvmValid': True, 'burstStart': 50, 'burstLength': 1004, 'timingOffsetSamples': 192, 'numDataSymbols': 4, 'syncRho': 0.9999999999999996, 'frequencyErrorHz': 50000.00009085487, 'evmRmsData': 0.0014142134996582409, 'ok': True, 'error': '', 'dataError': '', 'family': '802.11be'}
+DATA EVM: 0.141421% over 4 symbols
+python.exe : <notebook>:109: UserWarning: FigureCanvasAgg is non-interactive, 
+and thus cannot be shown
+In Zeile:1 Zeichen:24
++ ... KEND='Agg'; & C:\code\nrdemod-vsa\.venv-1\Scripts\python.exe -u -c "i ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (<notebook>:109:...cannot be shown 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Passed 28 DATA/EVM cases plus rejection and sync-only checks
+Notebook execution passed

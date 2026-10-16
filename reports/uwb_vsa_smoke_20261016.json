@@ -1,0 +1,37 @@
+{
+  "timestamp_utc": "2026-10-16T07:21:43.418773+00:00",
+  "command": [
+    "c:\\code\\nrdemod-vsa\\.venv-2\\Scripts\\python.exe",
+    "-u",
+    "tools/legacy_correlate.py",
+    "--only",
+    "802.15.4z_HrpUwb/802154HrpUwb_BPRF_SP0_Code9_Sync64_Delta4_SFD0_PDR-L_FrameLeng127_RRCMinPhase_OSR4"
+  ],
+  "exit_code": 0,
+  "stdout": "  loading recording\n  recalling 802.15.4z_HrpUwb_802154HrpUwb_BPRF_SP0_Code9_Sync64_Delta4_SFD0_PDR-L_FrameLeng127_RRCMinPhase_OSR4.setx\n  reloading recording after setx recall\n  measuring (span 1560.000 MHz, points 6553601, main 3.819 ms, needed 1.500 ms)\n{\"family\": \"802.15.4z_HrpUwb\", \"waveform\": \"802154HrpUwb_BPRF_SP0_Code9_Sync64_Delta4_SFD0_PDR-L_FrameLeng127_RRCMinPhase_OSR4\", \"ref_EvmRms\": null, \"vsa_EvmRms\": null, \"ref_EvmPeak\": null, \"vsa_EvmPeak\": null, \"ref_FrequencyError\": null, \"vsa_FrequencyError\": -1.0977476334128686e-08, \"ref_IQOffset\": null, \"vsa_IQOffset\": null, \"ref_IQQuadError\": null, \"vsa_IQQuadError\": null, \"ref_IQGainImbalance\": null, \"vsa_IQGainImbalance\": null, \"ref_SyncRho\": null, \"vsa_SyncRho\": null, \"ref_DeltaFAvg\": null, \"vsa_DeltaFAvg\": null, \"pass\": true, \"note\": \"ideal waveform: VSA locks, PHR/PSDU NRMSE <= 2 %\", \"vsa_all\": \"{\\\"FreqErr\\\": -1.0977476334128686e-08, \\\"FreqErrPpm\\\": -1.0977476334128686e-11, \\\"ChPower\\\": -3.699414742159562, \\\"TimeOffset\\\": 9.24073123441118e-10, \\\"Rmarker\\\": 0.00019325963907990617, \\\"ChipClkErr\\\": 5.615165992768623e-07, \\\"MainLobePk\\\": 98.10552109605953, \\\"MainLobeWidth\\\": 1.3013069510847686e-09, \\\"SideLobePk\\\": 24.63562495126423, \\\"SideLobePkLoc\\\": -2.6601227910388453e-09, \\\"OverallNrmse\\\": 0.12334830826148391, \\\"ShrNrmse\\\": 0.23202174343168736, \\\"PhrNrmse\\\": 0.01061079601640813, \\\"PsduNrmse\\\": 0.003330906110932119, \\\"AvgShrPower\\\": -3.950102526911921, \\\"PeakShrPower\\\": 5.997634373162111, \\\"AvgDataPower\\\": -3.7328566008312696, \\\"PeakDataPower\\\": 8.868436308364657, \\\"ShrAvgPulseAmpl\\\": 0.0, \\\"PhrAvgPulseAmpl\\\": 0.00011156776205265996, \\\"PsduAvgPulseAmpl\\\": 9.96604345128091e-05}\", \"status\": \"ok\"}\n",
+  "stderr": "",
+  "result": {
+    "family": "802.15.4z_HrpUwb",
+    "waveform": "802154HrpUwb_BPRF_SP0_Code9_Sync64_Delta4_SFD0_PDR-L_FrameLeng127_RRCMinPhase_OSR4",
+    "ref_EvmRms": null,
+    "vsa_EvmRms": null,
+    "ref_EvmPeak": null,
+    "vsa_EvmPeak": null,
+    "ref_FrequencyError": null,
+    "vsa_FrequencyError": -1.0977476334128686e-08,
+    "ref_IQOffset": null,
+    "vsa_IQOffset": null,
+    "ref_IQQuadError": null,
+    "vsa_IQQuadError": null,
+    "ref_IQGainImbalance": null,
+    "vsa_IQGainImbalance": null,
+    "ref_SyncRho": null,
+    "vsa_SyncRho": null,
+    "ref_DeltaFAvg": null,
+    "vsa_DeltaFAvg": null,
+    "pass": true,
+    "note": "ideal waveform: VSA locks, PHR/PSDU NRMSE <= 2 %",
+    "vsa_all": "{\"FreqErr\": -1.0977476334128686e-08, \"FreqErrPpm\": -1.0977476334128686e-11, \"ChPower\": -3.699414742159562, \"TimeOffset\": 9.24073123441118e-10, \"Rmarker\": 0.00019325963907990617, \"ChipClkErr\": 5.615165992768623e-07, \"MainLobePk\": 98.10552109605953, \"MainLobeWidth\": 1.3013069510847686e-09, \"SideLobePk\": 24.63562495126423, \"SideLobePkLoc\": -2.6601227910388453e-09, \"OverallNrmse\": 0.12334830826148391, \"ShrNrmse\": 0.23202174343168736, \"PhrNrmse\": 0.01061079601640813, \"PsduNrmse\": 0.003330906110932119, \"AvgShrPower\": -3.950102526911921, \"PeakShrPower\": 5.997634373162111, \"AvgDataPower\": -3.7328566008312696, \"PeakDataPower\": 8.868436308364657, \"ShrAvgPulseAmpl\": 0.0, \"PhrAvgPulseAmpl\": 0.00011156776205265996, \"PsduAvgPulseAmpl\": 9.96604345128091e-05}",
+    "status": "ok"
+  }
+}

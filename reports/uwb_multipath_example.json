@@ -1,0 +1,212 @@
+{
+  "capture": "captures/generated/uwb/UWB_4z_BPRF_ch5_CI10_SP1_PSDU127.txt",
+  "sample_rate_hz": 1996800000.0,
+  "noise_added": false,
+  "normalization": "none",
+  "rows": [
+    {
+      "channel": "No echo",
+      "taps": [
+        {
+          "requested_delay_ns": 0,
+          "delay_samples": 0,
+          "actual_delay_ns": 0.0,
+          "amplitude": 1.0,
+          "phase_deg": 0
+        }
+      ],
+      "ok": true,
+      "sfd_found": true,
+      "sts_valid": true,
+      "phr_valid": true,
+      "psdu_valid": true,
+      "exact_psdu": true,
+      "byte_errors": 0,
+      "sfd_rho": 0.9999981594340924,
+      "sts_rho": 0.9999999991905903,
+      "frequency_error_hz": -0.0,
+      "timing_shift_ns": 0.0,
+      "rs_corrected_symbols": 0,
+      "evm_percent": {
+        "shr": 2.227548207351514e-06,
+        "sts": 2.1197147080444614e-06,
+        "phr": 2.4509726417202627e-06,
+        "psdu": 2.4566038214156133e-06
+      },
+      "error": ""
+    },
+    {
+      "channel": "Weak echoes",
+      "taps": [
+        {
+          "requested_delay_ns": 0,
+          "delay_samples": 0,
+          "actual_delay_ns": 0.0,
+          "amplitude": 1.0,
+          "phase_deg": 0
+        },
+        {
+          "requested_delay_ns": 2,
+          "delay_samples": 4,
+          "actual_delay_ns": 2.003205128205128,
+          "amplitude": 0.25,
+          "phase_deg": 35
+        },
+        {
+          "requested_delay_ns": 8,
+          "delay_samples": 16,
+          "actual_delay_ns": 8.012820512820513,
+          "amplitude": 0.12,
+          "phase_deg": -50
+        }
+      ],
+      "ok": true,
+      "sfd_found": true,
+      "sts_valid": true,
+      "phr_valid": true,
+      "psdu_valid": true,
+      "exact_psdu": true,
+      "byte_errors": 0,
+      "sfd_rho": 0.996393876237429,
+      "sts_rho": 0.9999999836121208,
+      "frequency_error_hz": -1.2468885913281187e-05,
+      "timing_shift_ns": 0.0,
+      "rs_corrected_symbols": 0,
+      "evm_percent": {
+        "shr": 1.6997424324125695e-05,
+        "sts": 1.6952821294303768e-05,
+        "phr": 1.6765981342216784e-05,
+        "psdu": 1.6690359038269064e-05
+      },
+      "error": ""
+    },
+    {
+      "channel": "Moderate echoes",
+      "taps": [
+        {
+          "requested_delay_ns": 0,
+          "delay_samples": 0,
+          "actual_delay_ns": 0.0,
+          "amplitude": 1.0,
+          "phase_deg": 0
+        },
+        {
+          "requested_delay_ns": 8,
+          "delay_samples": 16,
+          "actual_delay_ns": 8.012820512820513,
+          "amplitude": 0.5,
+          "phase_deg": 70
+        },
+        {
+          "requested_delay_ns": 24,
+          "delay_samples": 48,
+          "actual_delay_ns": 24.03846153846154,
+          "amplitude": 0.3,
+          "phase_deg": -30
+        }
+      ],
+      "ok": true,
+      "sfd_found": true,
+      "sts_valid": true,
+      "phr_valid": true,
+      "psdu_valid": true,
+      "exact_psdu": true,
+      "byte_errors": 0,
+      "sfd_rho": 0.9246062095632006,
+      "sts_rho": 0.9999996525901441,
+      "frequency_error_hz": -2.9517404980597738e-05,
+      "timing_shift_ns": 0.0,
+      "rs_corrected_symbols": 0,
+      "evm_percent": {
+        "shr": 1.995683741187625e-05,
+        "sts": 2.0022189854669613e-05,
+        "phr": 2.0078275410796226e-05,
+        "psdu": 2.010500699572358e-05
+      },
+      "error": ""
+    },
+    {
+      "channel": "Strong delayed path",
+      "taps": [
+        {
+          "requested_delay_ns": 0,
+          "delay_samples": 0,
+          "actual_delay_ns": 0.0,
+          "amplitude": 0.5,
+          "phase_deg": 0
+        },
+        {
+          "requested_delay_ns": 16,
+          "delay_samples": 32,
+          "actual_delay_ns": 16.025641025641026,
+          "amplitude": 1.0,
+          "phase_deg": 0
+        },
+        {
+          "requested_delay_ns": 80,
+          "delay_samples": 160,
+          "actual_delay_ns": 80.12820512820512,
+          "amplitude": 0.8,
+          "phase_deg": 140
+        }
+      ],
+      "ok": false,
+      "sfd_found": true,
+      "sts_valid": false,
+      "phr_valid": false,
+      "psdu_valid": false,
+      "exact_psdu": false,
+      "byte_errors": null,
+      "sfd_rho": 0.8328391559360919,
+      "sts_rho": 0.784518395293796,
+      "frequency_error_hz": -8.41758077488821,
+      "timing_shift_ns": 16.025641025641026,
+      "rs_corrected_symbols": 0,
+      "evm_percent": {
+        "shr": null,
+        "sts": null,
+        "phr": null,
+        "psdu": null
+      },
+      "error": "keyed STS correlation failed"
+    },
+    {
+      "channel": "Long echo",
+      "taps": [
+        {
+          "requested_delay_ns": 0,
+          "delay_samples": 0,
+          "actual_delay_ns": 0.0,
+          "amplitude": 1.0,
+          "phase_deg": 0
+        },
+        {
+          "requested_delay_ns": 120,
+          "delay_samples": 240,
+          "actual_delay_ns": 120.19230769230768,
+          "amplitude": 0.8,
+          "phase_deg": 180
+        }
+      ],
+      "ok": true,
+      "sfd_found": true,
+      "sts_valid": true,
+      "phr_valid": true,
+      "psdu_valid": true,
+      "exact_psdu": true,
+      "byte_errors": 0,
+      "sfd_rho": 0.8670611192998303,
+      "sts_rho": 0.9999976335088995,
+      "frequency_error_hz": -1.97013646689056e-05,
+      "timing_shift_ns": 0.0,
+      "rs_corrected_symbols": 0,
+      "evm_percent": {
+        "shr": 79.82504018558522,
+        "sts": 79.91808588711667,
+        "phr": 78.66573618346186,
+        "psdu": 79.88363614194049
+      },
+      "error": ""
+    }
+  ]
+}

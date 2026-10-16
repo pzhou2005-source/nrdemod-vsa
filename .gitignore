@@ -1,7 +1,6 @@
 .venv/
 __pycache__/
-reports/*
-!reports/.keep
+reports/legacy_tmp/
 captures/*
 !captures/.keep
 

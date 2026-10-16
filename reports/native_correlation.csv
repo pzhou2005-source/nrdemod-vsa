@@ -1,0 +1,132 @@
+family,waveform,status,pass,native_EvmRms,vsa_EvmRms,delta_pp,native_dev_hz,vsa_dev_hz,delta_dev_pct,native_deltaFAvg_hz,native_FreqErr,vsa_FreqErr,delta_freq_hz,native_info,note
+802.11a,11a_12Mbps_QPSK_1024bytes_178sym,ok,True,0.007414819768612597,0.0051894099451601505,0.0022254098234524462,,,,,0.0,,,"rate 12 Mbps, 1058 B",
+802.11a,11a_18Mbps_QPSK_1024bytes_119sym,ok,True,0.0063901023045658395,0.004740655422210693,0.0016494468823551461,,,,,0.0,,,"rate 18 Mbps, 1058 B",
+802.11a,11a_24Mbps_16QAM_1024bytes_90sym,ok,True,0.007992814668213619,0.004729015752673149,0.00326379891554047,,,,,0.0,,,"rate 24 Mbps, 1058 B",
+802.11a,11a_36Mbps_16QAM_1024bytes_60sym,ok,True,0.007966646266227756,0.005024882964789867,0.0029417633014378886,,,,,0.0,,,"rate 36 Mbps, 1058 B",
+802.11a,11a_48Mbps_64QAM_1024bytes_46sym,ok,True,0.008393792936603172,0.004849981516599655,0.0035438114200035172,,,,,0.0,,,"rate 48 Mbps, 1058 B",
+802.11a,11a_54Mbps_64QAM_1024bytes_41sym,ok,True,0.009504247203822938,0.005089522805064917,0.0044147243987580215,,,,,0.0,,,"rate 54 Mbps, 1058 B",
+802.11a,11a_6Mbps_BPSK_1024bytes_355sym,ok,True,0.008760960527652495,0.006665434688329697,0.002095525839322798,,,,,0.0,,,"rate 6 Mbps, 1058 B",
+802.11a,11a_9Mbps_BPSK_1024bytes_237sym,ok,True,0.008621073354162649,0.006356606259942055,0.002264467094220594,,,,,0.0,,,"rate 9 Mbps, 1058 B",
+802.11ac,11ac_160MHz_MCS0_BPSK,ok,True,,,,,,,,-18.846305867167167,0.00010519484627735665,-18.846411062013445,mcs 0 mod 0 bw 160,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_160MHz_MCS1_QPSK,ok,True,,,,,,,,-21.191318878910348,0.00018658482912314867,-21.19150546373947,mcs 0 mod 0 bw 160,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_160MHz_MCS2_QPSK,ok,True,,,,,,,,-14.495371992939246,0.00019048055705184197,-14.495562473496298,mcs 2 mod 1 bw 160,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_160MHz_MCS3_16QAM,ok,True,,,,,,,,-15.788476290662897,-2.1723084508096235e-05,-15.78845456757839,mcs 2 mod 1 bw 160,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_160MHz_MCS4_16QAM,ok,True,,,,,,,,-27.39205457709134,-2.6295780664042923e-05,-27.392028281310676,mcs 4 mod 2 bw 160,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_160MHz_MCS5_64QAM,ok,True,,,,,,,,-33.78239371670311,0.00016650245623850424,-33.78256021915935,mcs 4 mod 2 bw 160,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_160MHz_MCS6_64QAM,ok,True,,,,,,,,-33.78363563682109,-0.00021995970580945823,-33.78341567711528,mcs 6 mod 3 bw 160,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_160MHz_MCS7_64QAM,ok,True,,,,,,,,-29.861704209032133,-0.00041908369267673606,-29.861285125339457,mcs 6 mod 3 bw 160,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_160MHz_MCS8_256QAM,ok,True,,,,,,,,-29.861704209032133,-0.00041908369267673606,-29.861285125339457,mcs 8 mod 4 bw 160,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_160MHz_MCS9_256QAM,ok,True,,,,,,,,-24.432674314021813,-9.773118247125012e-05,-24.432576582839342,mcs 8 mod 4 bw 160,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_20MHz_MCS0_BPSK,ok,True,0.00805701348967672,0.004238440655171871,0.003818572834504848,,,,,0.0,,,mcs 0 mod 0 bw 20,
+802.11ac,11ac_20MHz_MCS1_QPSK,ok,True,0.0075569171435672594,0.0037792017683386803,0.003777715375228579,,,,,0.0,,,mcs 0 mod 1 bw 20,
+802.11ac,11ac_20MHz_MCS2_QPSK,ok,True,0.006649237122248261,0.003628914710134268,0.003020322412113993,,,,,0.0,,,mcs 2 mod 1 bw 20,
+802.11ac,11ac_20MHz_MCS3_16QAM,ok,True,0.007769371848794973,0.003803385654464364,0.003965986194330609,,,,,0.0,,,mcs 2 mod 2 bw 20,
+802.11ac,11ac_20MHz_MCS4_16QAM,ok,True,0.007749584767440694,0.003584710881114006,0.004164873886326688,,,,,0.0,,,mcs 4 mod 2 bw 20,
+802.11ac,11ac_20MHz_MCS5_64QAM,ok,True,0.008859332527414405,0.0035920466762036085,0.005267285851210796,,,,,0.0,,,mcs 4 mod 3 bw 20,
+802.11ac,11ac_20MHz_MCS6_64QAM,ok,True,0.009245373752369512,0.0037256558425724506,0.005519717909797061,,,,,0.0,,,mcs 6 mod 3 bw 20,
+802.11ac,11ac_20MHz_MCS7_64QAM,ok,True,0.007708729226835086,0.003166196634992957,0.004542532591842129,,,,,0.0,,,mcs 6 mod 3 bw 20,
+802.11ac,11ac_20MHz_MCS8_256QAM,ok,True,0.00994894258485551,0.003538768272846937,0.006410174312008573,,,,,0.0,,,mcs 8 mod 4 bw 20,
+802.11ac,11ac_20MHz_MCS9_256QAM,ok,True,0.00994894258485551,0.003538768272846937,0.006410174312008573,,,,,0.0,,,mcs 8 mod 4 bw 20,
+802.11ac,11ac_40MHz_MCS0_BPSK,ok,True,,,,,,,,-49.29241289477717,-0.00012112701377020585,-49.2922917677634,mcs 0 mod 0 bw 40,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_40MHz_MCS1_QPSK,ok,True,,,,,,,,-67.43793806111083,-0.0001693083249421079,-67.43776875278589,mcs 0 mod 0 bw 40,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_40MHz_MCS2_QPSK,ok,True,,,,,,,,5.76237905096415,0.00020365255069521027,5.762175398413455,mcs 2 mod 1 bw 40,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_40MHz_MCS3_16QAM,ok,True,,,,,,,,-53.692126173913515,-0.0001295234271623258,-53.69199665048635,mcs 2 mod 1 bw 40,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_40MHz_MCS4_16QAM,ok,True,,,,,,,,-23.94236623247486,6.460357651860704e-05,-23.94243083605138,mcs 4 mod 2 bw 40,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_40MHz_MCS5_64QAM,ok,True,,,,,,,,-57.75011967090303,0.0005141194250484205,-57.75063379032808,mcs 4 mod 2 bw 40,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_40MHz_MCS6_64QAM,ok,True,,,,,,,,-53.30471441947638,0.00048666804153185694,-53.305201087517915,mcs 6 mod 3 bw 40,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_40MHz_MCS7_64QAM,ok,True,,,,,,,,-73.04201509348876,-0.0001484029766771755,-73.04186669051208,mcs 6 mod 3 bw 40,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_40MHz_MCS8_256QAM,ok,True,,,,,,,,-26.557305568740677,0.00010226245638023101,-26.557407831197057,mcs 8 mod 4 bw 40,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_40MHz_MCS9_256QAM,ok,True,,,,,,,,-30.524693139137703,-0.00015044762658078525,-30.524542691511122,mcs 8 mod 4 bw 40,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_80MHz_MCS0_BPSK,ok,True,,,,,,,,-19.85995500417585,0.0036199188116086134,-19.863574922987457,mcs 0 mod 0 bw 80,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_80MHz_MCS1_QPSK,ok,True,,,,,,,,-21.988865217601457,0.004509337528411095,-21.99337455512987,mcs 0 mod 0 bw 80,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_80MHz_MCS2_QPSK,ok,True,,,,,,,,-31.387946905997083,0.10260368141824472,-31.490550587415328,mcs 2 mod 1 bw 80,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_80MHz_MCS3_16QAM,ok,True,,,,,,,,-21.15970039528193,0.06790682831714889,-21.22760722359908,mcs 2 mod 1 bw 80,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_80MHz_MCS4_16QAM,ok,True,,,,,,,,-14.989116456664814,0.04158131060151504,-15.030697767266329,mcs 4 mod 2 bw 80,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_80MHz_MCS5_64QAM,ok,True,,,,,,,,-14.279493753293362,0.05726385340955176,-14.336757606702914,mcs 4 mod 2 bw 80,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_80MHz_MCS6_64QAM,ok,True,,,,,,,,-22.59212609159229,0.005178810411294421,-22.597304902003586,mcs 6 mod 3 bw 80,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_80MHz_MCS7_64QAM,ok,True,,,,,,,,-34.260998102985035,0.13392751561049465,-34.39492561859553,mcs 6 mod 3 bw 80,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_80MHz_MCS8_256QAM,ok,True,,,,,,,,-26.72114709390138,0.09533744487225704,-26.816484538773636,mcs 8 mod 4 bw 80,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11ac,11ac_80MHz_MCS9_256QAM,ok,True,,,,,,,,-31.369715656023754,0.10826748552058518,-31.47798314154434,mcs 8 mod 4 bw 80,native core has no EVM above 20 MHz; compared on sync and frequency error
+802.11b,11b_11Mbps_QPSK,ok,False,0.3226115826550458,0.07781215012073517,0.24479943253431063,,,,,0.0,,,cck=True dataEVM=7.66 %,
+802.11b,11b_1Mbps_BPSK,ok,False,0.3226711735599469,0.07907813042402267,0.24359304313592423,,,,,0.0,,,cck=False dataEVM=0.00 %,
+802.11b,11b_2Mbps_QPSK,ok,False,0.3226839268871185,0.07887516170740128,0.24380876517971722,,,,,0.0,,,cck=False dataEVM=0.00 %,
+802.11b,11b_5p5Mbps_QPSK,ok,False,0.3226043590735269,0.07872991263866425,0.24387444643486267,,,,,0.0,,,cck=True dataEVM=7.11 %,
+802.11n,11n_20MHz_MCS0_BPSK_1024bytes,ok,True,0.006443842705141212,0.0037387001793831587,0.002705142525758053,,,,,0.0,,,mcs 0 mod 0 bw 20,
+802.11n,11n_20MHz_MCS1_QPSK_1024bytes,ok,True,0.006323211325020734,0.003680081805214286,0.002643129519806448,,,,,0.0,,,mcs 1 mod 1 bw 20,
+802.11n,11n_20MHz_MCS2_QPSK_1024bytes,ok,True,0.006700513533610606,0.003535882569849491,0.003164630963761115,,,,,0.0,,,mcs 2 mod 1 bw 20,
+802.11n,11n_20MHz_MCS3_16QAM_1024bytes,ok,True,0.008771602092364439,0.0039064898155629635,0.004865112276801475,,,,,0.0,,,mcs 3 mod 2 bw 20,
+802.11n,11n_20MHz_MCS4_16QAM_1024bytes,ok,True,0.007457102492106245,0.0034353325609117746,0.00402176993119447,,,,,0.0,,,mcs 4 mod 2 bw 20,
+802.11n,11n_20MHz_MCS5_64QAM_1024bytes,ok,True,0.008993447273969517,0.0036622474435716867,0.00533119983039783,,,,,0.0,,,mcs 5 mod 3 bw 20,
+802.11n,11n_20MHz_MCS6_64QAM_1024bytes,ok,True,0.008679182125247986,0.0034543147776275873,0.005224867347620399,,,,,0.0,,,mcs 6 mod 3 bw 20,
+802.11n,11n_20MHz_MCS7_64QAM_1024bytes,ok,True,0.008818262702252439,0.00341766863130033,0.005400594070952109,,,,,0.0,,,mcs 7 mod 3 bw 20,
+802.11n,11n_40MHz_MCS0_BPSK_1024bytes,unsupported,,,,,,,,,,,,,native 802.11n core is 20 MHz only
+802.11n,11n_40MHz_MCS1_QPSK_1024bytes,unsupported,,,,,,,,,,,,,native 802.11n core is 20 MHz only
+802.11n,11n_40MHz_MCS2_QPSK_1024bytes,unsupported,,,,,,,,,,,,,native 802.11n core is 20 MHz only
+802.11n,11n_40MHz_MCS3_16QAM_1024bytes,unsupported,,,,,,,,,,,,,native 802.11n core is 20 MHz only
+802.11n,11n_40MHz_MCS4_16QAM_1024bytes,unsupported,,,,,,,,,,,,,native 802.11n core is 20 MHz only
+802.11n,11n_40MHz_MCS5_64QAM_1024bytes,unsupported,,,,,,,,,,,,,native 802.11n core is 20 MHz only
+802.11n,11n_40MHz_MCS6_64QAM_1024bytes,unsupported,,,,,,,,,,,,,native 802.11n core is 20 MHz only
+802.11n,11n_40MHz_MCS7_64QAM_1024bytes,unsupported,,,,,,,,,,,,,native 802.11n core is 20 MHz only
+802.15.4z_HrpUwb,802154HrpUwb_BPRF_SP0_Code9_Sync64_Delta4_SFD0_PDR-L_FrameLeng127_RRCMinPhase_OSR4,ok,True,,,,,,,,-0.0,-1.0977476334128686e-08,1.0977476334128686e-08,syncRho=0.9898777908277031,
+802.15.4z_HrpUwb,802154HrpUwb_BPRF_SP1_Code9_Sync64_Delta4_SFD2_PDR-L_FrameLeng127_STS-SegLen64-SegNum1_RRCMinPhase_OSR4,ok,True,,,,,,,,-0.0,-6.85230147753499e-09,6.85230147753499e-09,syncRho=0.9999975006867148,
+802.15.4z_HrpUwb,802154HrpUwb_BPRF_SP3_Code9_Sync64_Delta4_SFD2_STS-SegLen64-SegNum1_RRCMinPhase_OSR4,ok,True,,,,,,,,-0.0,-4.881130199494349e-08,4.881130199494349e-08,syncRho=0.9999975008271081,
+802.15.4z_HrpUwb,802154HrpUwb_HPRF_SP0_Code25_Sync64_Delta4_SFD2_PDR-L_FrameLeng1023_RRCMinPhase_OSR4,ok,True,,,,,,,,-0.0,1.9400004724115968e-07,-1.9400004724115968e-07,syncRho=0.9999999999933559,
+802.15.4z_HrpUwb,802154HrpUwb_HPRF_SP1_Code25_Sync64_Delta4_SFD2_PDR-L_FrameLeng1023_STS-SegLen64-SegNum1_RRCMinPhase_OSR4,ok,True,,,,,,,,-0.0,1.9400004724115968e-07,-1.9400004724115968e-07,syncRho=0.9999999999933559,
+802.15.4z_HrpUwb,802154HrpUwb_HPRF_SP3_Code25_Sync64_Delta4_SFD3_STS-SegLen128-SegNum1_RRCMinPhase_OSR4,ok,True,,,,,,,,-0.0,7.733191817447881e-08,-7.733191817447881e-08,syncRho=0.9999999999947281,
+BluetoothBdr,BT_BDR_1DH1_10101010,unsupported,,,,,,,,,,,,,native BT core is LE only (no BR GFSK)
+BluetoothBdr,BT_BDR_1DH1_11110000,unsupported,,,,,,,,,,,,,native BT core is LE only (no BR GFSK)
+BluetoothBdr,BT_BDR_1DH3_10101010,unsupported,,,,,,,,,,,,,native BT core is LE only (no BR GFSK)
+BluetoothBdr,BT_BDR_1DH3_11110000,unsupported,,,,,,,,,,,,,native BT core is LE only (no BR GFSK)
+BluetoothBdr,BT_BDR_1DH5_10101010,unsupported,,,,,,,,,,,,,native BT core is LE only (no BR GFSK)
+BluetoothBdr,BT_BDR_1DH5_11110000,unsupported,,,,,,,,,,,,,native BT core is LE only (no BR GFSK)
+BluetoothEdr,BT_EDR_2DH1,unsupported,,,,,,,,,,,,,native BT core is LE only (no EDR DPSK)
+BluetoothEdr,BT_EDR_2DH3,unsupported,,,,,,,,,,,,,native BT core is LE only (no EDR DPSK)
+BluetoothEdr,BT_EDR_2DH5,unsupported,,,,,,,,,,,,,native BT core is LE only (no EDR DPSK)
+BluetoothEdr,BT_EDR_3DH1,unsupported,,,,,,,,,,,,,native BT core is LE only (no EDR DPSK)
+BluetoothEdr,BT_EDR_3DH3,unsupported,,,,,,,,,,,,,native BT core is LE only (no EDR DPSK)
+BluetoothEdr,BT_EDR_3DH5,unsupported,,,,,,,,,,,,,native BT core is LE only (no EDR DPSK)
+BluetoothLe1M,LE1M_AA_255B,ok,True,,,,249931.78178196782,251666.46875,-0.6892801320128927,143753.82445427272,-2.546585164964199e-12,0.005334941204637289,,syncWord=True rho=1.0,
+BluetoothLe1M,LE1M_AA_37B,ok,True,,,,250013.46520209883,251459.65625,-0.5751185178044516,149303.64006959373,-2.546585164964199e-12,48.429786682128906,,syncWord=True rho=1.0,
+BluetoothLe1M,LE1M_F0_255B,ok,True,,,,250021.04234836728,250162.609375,-0.0565900023934085,220182.4445427352,-2.546585164964199e-12,-0.5108157992362976,,syncWord=True rho=1.0,
+BluetoothLe1M,LE1M_F0_37B,ok,True,,,,250021.04234836728,250259.46875,-0.09527168055762925,209711.09278510773,-2.546585164964199e-12,22.068342208862305,,syncWord=True rho=1.0,
+BluetoothLe2M,LE2M_AA_255B,ok,True,,,,499840.92694238364,503332.21875,-0.6936356699530966,285837.64805982425,-5.093170329928398e-12,-0.04522254317998886,,syncWord=True rho=1.0,
+BluetoothLe2M,LE2M_AA_37B,ok,True,,,,500026.93040419766,502908.59375,-0.5729994240732394,291039.7427681303,-5.093170329928398e-12,113.32486724853516,,syncWord=True rho=1.0,
+BluetoothLe2M,LE2M_F0_255B,ok,True,,,,500042.08469673456,500147.21875,-0.021020621393874617,437243.42062656546,-5.093170329928398e-12,222.48684692382812,,syncWord=True rho=1.0,
+BluetoothLe2M,LE2M_F0_37B,ok,True,,,,500042.08469673456,500614.125,-0.11426771133663527,406500.3852449239,-5.093170329928398e-12,51.926979064941406,,syncWord=True rho=1.0,
+BluetoothLeCodedS8,LELR8_FF,unsupported,,,,,,,,,,,,,native BT core handles uncoded LE1M/LE2M only
+NbIotDl,NBIOT_DL_NB1_MCS0,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB1_MCS1,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB1_MCS10,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB1_MCS2,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB1_MCS3,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB1_MCS4,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB1_MCS5,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB1_MCS6,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB1_MCS7,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB1_MCS8,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB1_MCS9,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB2_MCS0,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB2_MCS1,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB2_MCS10,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB2_MCS2,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB2_MCS3,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB2_MCS4,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB2_MCS5,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB2_MCS6,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB2_MCS7,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB2_MCS8,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotDl,NBIOT_DL_NB2_MCS9,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS0,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS1,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS10,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS11,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS12,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS13,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS2,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS3,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS4,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS5,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS6,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS7,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS8,unsupported,,,,,,,,,,,,,no native NB-IoT core
+NbIotUl,NBIOT_UL_MCS9,unsupported,,,,,,,,,,,,,no native NB-IoT core
