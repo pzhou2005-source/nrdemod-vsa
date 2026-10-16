@@ -16,6 +16,8 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
+#include <string>
 #include <vector>
 
 using namespace uwbdemod;
@@ -168,6 +170,134 @@ void testNoiseOnlyCaptureFailsSync()
   }
 }
 
+std::vector<std::complex<double> > packet(bool legacy, int sp, int rsErrors, int phrErrors,
+                                        double cfo, bool damageSfd = false)
+{
+  const std::string code = legacy ? "-+0++000-+-++00++0+00-0000-0+0-" :
+      "+00+000-0--00--+0+0+00-+-++0+0000++-000+00-00--0-+0+0--0-+++0++000+-0+00-0++-0+++00-+00+0+0-0++-+--+000000+00000-+0000-0-000--+";
+  // Independent Python/RSCodec golden stages for PSDU octets 01 23 45 67.
+  std::string phr = "1000001000001011010";
+  const std::string rs = "10000000110001001010001011100110011001110000010000000011100010110000000001111010";
+  for (int i = 0; i < phrErrors; ++i) phr[5+6*i] = phr[5+6*i] == '0' ? '1' : '0';
+  std::vector<int> input;
+  for (size_t i = 0; i < phr.size(); ++i) input.push_back(phr[i]-'0');
+  for (size_t i = 0; i < rs.size(); ++i) input.push_back(rs[i]-'0');
+  for (int i = 0; i < rsErrors; ++i) input[19+2+6*i] ^= 1;
+  input.push_back(0); input.push_back(0);
+  std::vector<int> encoded;
+  int previous = 0, older = 0;
+  for (size_t i = 0; i < input.size(); ++i) {
+    encoded.push_back(previous);
+    encoded.push_back(input[i]^older);
+    older = previous; previous = input[i];
+  }
+  std::vector<int> pn;
+  for (size_t i = 0; i < code.size() && pn.size() < 15; ++i)
+    if (code[i] != '0') pn.push_back(code[i] == '+' ? 1 : 0);
+  for (int i = 15; i < 10000; ++i) pn.push_back(pn[i-14]^pn[i-15]);
+  const int spreading = legacy ? 16 : 4, bursts = legacy ? 32 : 8;
+  const int cpbPhr = legacy ? 16 : 64, cpbData = legacy ? 2 : 8;
+  const int period = static_cast<int>(code.size())*spreading;
+  const int sfd[] = {0,1,0,-1,1,0,0,-1};
+  const int skipSts = sp == 1 ? 33792 : 0;
+  const int dataChips = sp == 3 ? 0 : 21*bursts*cpbPhr + (static_cast<int>(input.size())-21)*bursts*cpbData;
+  std::vector<double> chips(72*period + skipSts + dataChips, 0.0);
+  for (int symbol = 0; symbol < 72; ++symbol) {
+    const int polarity = symbol < 64 ? 1 : (damageSfd ? 1 : sfd[symbol-64]);
+    for (size_t i = 0; i < code.size(); ++i)
+      chips[symbol*period+i*spreading] = polarity * (code[i] == '+' ? 1 : (code[i] == '-' ? -1 : 0));
+  }
+  int offset = 72*period+skipSts, pnOffset = 15;
+  for (size_t k = 0; sp != 3 && k < input.size(); ++k) {
+    const int cpb = k < 21 ? cpbPhr : cpbData;
+    int hop = pn[pnOffset];
+    if (legacy) hop += 2*pn[pnOffset+1]+4*pn[pnOffset+2];
+    const int begin = offset + (hop+encoded[2*k]*bursts/2)*cpb;
+    for (int j = 0; j < cpb; ++j)
+      chips[begin+j] = (1-2*encoded[2*k+1])*(1-2*pn[pnOffset+j]);
+    offset += bursts*cpb;
+    pnOffset += cpb;
+  }
+  const double b[] = {0.010209480791203138,0.040837923164812551,0.061256884747218826,
+                      0.040837923164812551,0.010209480791203138};
+  const double a[] = {1,-1.9684277869385185,1.7358607092088867,-0.72447082950736263,0.12038959989624451};
+  std::vector<double> x(chips.size()*4+256,0.0), y(x.size(),0.0);
+  for (size_t i = 0; i < chips.size(); ++i) x[73+4*i] = chips[i];
+  std::vector<std::complex<double> > iq(x.size());
+  unsigned noise = 81;
+  for (size_t i = 0; i < x.size(); ++i) {
+    y[i] = b[0]*x[i];
+    for (size_t j = 1; j <= 4 && j <= i; ++j) y[i] += b[j]*x[i-j]-a[j]*y[i-j];
+    noise = 1664525u*noise+1013904223u;
+    const double nr = (static_cast<double>(noise>>8)/16777216.0-0.5)*0.0001;
+    noise = 1664525u*noise+1013904223u;
+    const double ni = (static_cast<double>(noise>>8)/16777216.0-0.5)*0.0001;
+    iq[i] = y[i]*std::polar(0.7, 0.81+TWO_PI*cfo*i/1996.8e6) + std::complex<double>(nr,ni);
+  }
+  return iq;
+}
+
+void testPacketDecoding()
+{
+  Config cfg;
+  cfg.sampleRate = 1996.8e6;
+  DataConfig data;
+  const int expected[] = {1,35,69,103};
+  for (int legacy = 0; legacy < 2; ++legacy) {
+    cfg.phyMode = legacy ? IEEE802154A : BPRF;
+    data.codeIndex = legacy ? 3 : 9;
+    data.meanPrfMHz = legacy ? 15.6 : 62.4;
+    for (int errors = 0; errors <= 4; ++errors) {
+      const Result r = demodulateData(packet(legacy != 0,0,errors,0,200e3),cfg,data);
+      if (!r.dataError.empty()) std::printf("packet error: %s\n",r.dataError.c_str());
+      CHECK(r.ok && r.sfdFound && r.phrDecoded && r.psduDecoded && r.rsOk);
+      CHECK(r.psduBytes == std::vector<int>(expected,expected+4));
+      CHECK(r.rsCorrectedSymbols == errors);
+      CHECK(r.phrStartSamples == 73+72*(legacy ? 496 : 508)*4);
+      CHECK_NEAR(r.frequencyErrorHz,200e3,10);
+    }
+    Result r = demodulateData(packet(legacy != 0,0,5,0,0),cfg,data);
+    CHECK(!r.psduDecoded && !r.rsOk && !r.dataError.empty());
+    r = demodulateData(packet(legacy != 0,0,0,1,0),cfg,data);
+    CHECK(r.psduDecoded && r.psduBytes == std::vector<int>(expected,expected+4));
+    r = demodulateData(packet(legacy != 0,0,0,2,0),cfg,data);
+    CHECK(!r.phrDecoded && !r.dataError.empty());
+    r = demodulateData(packet(legacy != 0,0,0,0,0,true),cfg,data);
+    CHECK(!r.sfdFound && !r.psduDecoded && !r.dataError.empty());
+    std::vector<std::complex<double> > truncated = packet(legacy != 0,0,0,0,0);
+    truncated.resize(truncated.size()-4096);
+    r = demodulateData(truncated,cfg,data);
+    CHECK(!r.psduDecoded && !r.dataError.empty());
+    data.codeIndex = legacy ? 4 : 10;
+    r = demodulateData(packet(legacy != 0,0,0,0,0),cfg,data);
+    CHECK(!r.psduDecoded && !r.dataError.empty());
+  }
+  cfg.phyMode = BPRF;
+  data = DataConfig();
+  for (int sp = 1; sp <= 3; ++sp) {
+    data.stsPacketConfiguration = sp;
+    const Result r = demodulateData(packet(false,sp,0,0,0),cfg,data);
+    CHECK(r.sfdFound && r.dataError.empty());
+    CHECK(r.psduDecoded == (sp != 3));
+  }
+}
+
+void testInvalidInputs()
+{
+  Config cfg;
+  cfg.sampleRate = 1996.8e6;
+  std::vector<std::complex<double> > iq(20000, std::complex<double>(0,0));
+  CHECK(!demodulate(iq,cfg).ok);
+  iq[0] = std::complex<double>(std::numeric_limits<double>::quiet_NaN(),0);
+  CHECK(!demodulate(iq,cfg).ok);
+  iq[0] = std::complex<double>(1,0);
+  cfg.chipRateHz = 0;
+  CHECK(!demodulate(iq,cfg).ok);
+  cfg.chipRateHz = 499.2e6;
+  cfg.syncLength = -1;
+  CHECK(!demodulate(iq,cfg).ok);
+}
+
 }
 
 int main()
@@ -176,6 +306,8 @@ int main()
   testCarrierFrequencyErrorRecovery();
   testNoBurstWhenCaptureIsEmpty();
   testNoiseOnlyCaptureFailsSync();
+  testPacketDecoding();
+  testInvalidInputs();
 
   if (gFailures == 0) {
     std::printf("All UWB HRP core tests passed\n");

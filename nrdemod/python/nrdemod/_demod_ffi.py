@@ -46,6 +46,15 @@ class WifiBeDataConfig(ctypes.Structure):
         "dataGuardIntervalSamples", "numDataSymbols",
     )]
 
+class UwbHrpDataConfig(ctypes.Structure):
+    _fields_ = [
+        ("codeIndex", c_int), ("sfdNumber", c_int), ("sfdLength", c_int),
+        ("preambleSpreadingFactor", c_int), ("meanPrfMHz", c_double),
+        ("phrDataRateKbps", c_int), ("stsPacketConfiguration", c_int),
+        ("constraintLength", c_int), ("numStsSegments", c_int), ("stsSegmentLength", c_int),
+        ("extraStsGapIndex", c_int), ("extraStsGapLength", c_int),
+    ]
+
 
 def _search_paths() -> list:
     here = os.path.dirname(os.path.abspath(__file__))
@@ -100,13 +109,21 @@ lib.demod_result_ok.restype = c_int
 lib.demod_result_error.argtypes = [_ResultPtr]
 lib.demod_result_error.restype = c_char_p
 
+if hasattr(lib, "demod_result_data_error"):
+    lib.demod_result_data_error.argtypes = [_ResultPtr]
+    lib.demod_result_data_error.restype = c_char_p
+
+if hasattr(lib, "demod_uwb_hrp_data"):
+    lib.demod_uwb_hrp_data.argtypes = [
+        POINTER(c_float), c_size_t, POINTER(DemodConfig), POINTER(UwbHrpDataConfig)
+    ]
+    lib.demod_uwb_hrp_data.restype = _ResultPtr
+
 if hasattr(lib, "demod_wifi_be_data"):
     lib.demod_wifi_be_data.argtypes = [
         POINTER(c_float), c_size_t, POINTER(DemodConfig), POINTER(WifiBeDataConfig)
     ]
     lib.demod_wifi_be_data.restype = _ResultPtr
-    lib.demod_result_data_error.argtypes = [_ResultPtr]
-    lib.demod_result_data_error.restype = c_char_p
 
 lib.demod_result_get_bool.argtypes = [_ResultPtr, c_char_p, POINTER(c_int)]
 lib.demod_result_get_bool.restype = c_int

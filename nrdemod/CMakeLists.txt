@@ -67,6 +67,7 @@ add_library(demod SHARED
   src/Wifi11beOfdmCore.cpp
   src/BtGfskCore.cpp
   src/UwbHrpCore.cpp
+  src/UwbHrpData.cpp
   src/demod_c.cpp
 )
 
@@ -128,6 +129,9 @@ if(NRDEMOD_BUILD_TESTS)
     list(GET pair 0 testName)
     list(GET pair 1 coreName)
     add_executable(${testName} tests/${testName}.cpp src/${coreName}.cpp)
+    if(testName STREQUAL "UwbHrpCoreTest")
+      target_sources(${testName} PRIVATE src/UwbHrpData.cpp)
+    endif()
     if(testName STREQUAL "Wifi11axOfdmCoreTest")
       target_sources(${testName} PRIVATE src/Wifi11beOfdmCore.cpp)
     endif()

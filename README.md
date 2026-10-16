@@ -15,8 +15,7 @@ nrdemod-vsa/
   configs/*.json            measurement cases (FR1 100 MHz, FR2 200 MHz, ...)
   captures/                 VSA recordings
   captures/exported/        5GNR TDC captures exported as .npy+.json (native nrdemod replay)
-  captures/tdc_reference/   WiFi/UWB/Bluetooth/NB-IoT/LTE/eMTC TDC captures as raw .wfm+.para2 (legacy-only
-                            standards: no native nrdemod backend, so play the .wfm directly into
+  captures/tdc_reference/   WiFi/UWB/Bluetooth/NB-IoT/LTE/eMTC TDC captures as raw .wfm+.para2 (play the .wfm into
                             the 89600 and compare against the recorded RESULTs in the .para2)
   captures/tdc_reference_plaintext/  same captures as unencrypted VSA_89600 .txt (no Signal Studio
                             decrypt license needed; nrdemod/python/nrdemod/vsa.py's load_iq() reads
@@ -34,6 +33,105 @@ the same captures converted to unencrypted VSA_89600 `.txt` (`captures/tdc_refer
 the in-tree `testDemod_ConvertTdcWaveformsToUnencryptedVsa89600` test
 (`NR_DEMOD_REFERENCE_WAVEFORM_CONVERT_OUTPUT`).
 
+
+## UWB file correlation
+
+Run `python tools\uwb\uwb_correlate.py --no-restart` against the running local
+89600, or add `--no-vsa` to run only the local receivers. Use
+`--cfo-hz 200000 --csv reports\uwb_correlation_cfo200k.csv` for an offset test.
+`--match` filters filenames and can be repeated. Generate captures with
+`tools\uwb\gen_uwb.m` in MATLAB first.
+Add `--skip-unsupported` to omit the three EHPRF captures explicitly; the
+console reports the skipped count. This does not exclude the failing 4a case.
+
+The native C++ receiver now decodes **BPRF, 802.15.4a and HPRF CL3/CL7 payloads**:
+code-aware matched filtering/timing, CFO, SFD, PHR SECDED, PN scrambling/hopping,
+soft Viterbi (K=3 or K=7), and RS(63,55) with up to four corrected symbols per
+block where applicable. HPRF CL7 separately terminates the PHR and PSDU and has
+no RS outer code. SP1 skips the configured STS segments; SP3 validates SHR/SFD
+without inventing a payload. STS authentication and MAC FCS validation are not
+implemented. The independent Python receiver covers BPRF/4a.
+VSA NRMSE is reported in percent: required fields must be finite, nonnegative,
+and no greater than 0.5%. SP3 requires SHR/STS but no PHR/PSDU. Passing also
+requires successful native packet decoding, successful supported Python decoding,
+and CFO agreement with the injected offset within 1 kHz. VSA PSDU decoding
+is enabled and its decoded octets are converted from LSB-first to the capture's
+MSB-first convention. The payload must match `PayloadHex`, or the Python
+payload when no transmitter reference is available (native payload for HPRF).
+Native payloads must independently match the transmitter, Python or VSA; a
+decoded native payload is not compared with itself. Payload mismatch/error
+counts are included in the CSV. Matching acquisition
+failures, missing metrics, and receiver errors cannot pass. Timing deltas are
+diagnostic only: envelope onset and VSA time offset use different references.
+
+The installed VSA 2023 personality has no EHPRF mode; the three draft
+802.15.4ab captures remain explicitly unsupported. For HPRF at 124.8 MHz PRF,
+the MATLAB R2025a mapper already inserts half-rate pulse gaps, but its
+`SampleRate` property halves the export clock again. Pulse counting confirms
+62.4 MHz instead of the configured 124.8 MHz. The exporter corrects this to
+the 499.2 MHz chip grid, retaining `MatlabSampleRate` and a
+`SampleRateCorrection` explanation in the metadata. VSA decodes the corrected
+waveform's payload exactly; this is a producer-clock correction, not a
+receiver-only playback override.
+
+In the 4a capture (`NCpb=2`, `NHop=8`), the installed
+VSA reference's hopping sequence matches a one-chip-earlier PN offset over
+all 944 PSDU symbols, and its decoded payload has 178/800 bit errors.
+The native C++ and Python payloads both match the transmitter. This remains an
+unresolved VSA correlation failure, not a native decoding failure. Discarding data metrics or
+altering the transmitted hopping to suit the receiver would not be valid fixes.
+
+Run the verdict regressions without an instrument:
+`python -m unittest discover -s tools\uwb -p test_uwb_correlate.py`.
+
+### Native payload API and verification
+
+The existing acquisition-only API and `DemodConfig` ABI v1 layout are unchanged.
+Opt into full decoding with `demod_uwb_hrp_data` in C, `demodulateData` in C++,
+or Python's `UwbHrpDataConfig`:
+
+```python
+from nrdemod import demod
+
+result = demod.demodulate(
+    demod.UWB_HRP, iq,
+    demod.Config(sampleRate=1996.8e6, phyMode=0, syncLength=64),
+    data_config=demod.UwbHrpDataConfig(codeIndex=9, meanPrfMHz=62.4),
+)
+if not result.ok or not result.psduDecoded:
+    raise RuntimeError(result.error or result.dataError)
+payload = bytes(result.psduBytes.tolist())
+```
+
+`phyMode` is 0=BPRF, 1=HPRF, 2=802.15.4a. For HPRF explicitly select code
+25..32, `meanPrfMHz=124.8` or `249.6`, SFD 1..4, `constraintLength=3` or `7`,
+and the STS segment count/length. SP2 extra-gap fields are also supported;
+`extraStsGapLength` is 0..127 in units of four grid chips.
+Check `sfdFound`, `phrDecoded`, `psduDecoded` and `dataError`; `ok` alone only
+indicates acquisition processing succeeded. `rsOk` is intentionally false for
+CL7 because there is no RS stage. Stage vectors include corrected `phrBits`,
+`psduBits`, `psduBytes`, flattened two-metric-per-symbol `softBits`, and BPRF/4a
+`burstPositions`. HPRF CL3's first soft metric represents `g0 XOR g1`.
+`evmDb` measures matched burst/group correlation error, not VSA chip NRMSE.
+
+The data receiver requires an integer 2..32 samples per 499.2-MHz grid chip.
+CFO is unambiguous within half the preamble repetition rate; 3.9-MHz-PRF
+legacy frames have a narrower range than BPRF/HPRF. No channel equalizer or
+fractional-rate resampler is provided. On Windows, use MSVC or Windows-native
+MinGW: the Cygwin DLLs crashed when loaded into CPython on this station.
+
+Build `demod` and `UwbHrpCoreTest` with CMake Tools; run `UwbHrpCoreTest` with
+the CMake test integration. For independent MATLAB references plus native
+modulation/FEC, impairment, truncation and maximum-length tests:
+
+`python -m unittest discover -s tools\uwb -p test_native_hrp.py -v`
+
+The nine BPRF/4a MATLAB fixtures come from `tools\uwb\gen_hrp_reference.m`.
+Additional HPRF CL3/CL7 fixtures can be generated with
+`tools\uwb\gen_hprf_reference.m`; this optional matrix is skipped if absent.
+Generating new MATLAB vectors requires access to the MATLAB license server.
+Existing generated HPRF captures are independently checked against their
+transmitter payloads and VSA by the correlation runner.
 
 ## Install on the Windows station
 

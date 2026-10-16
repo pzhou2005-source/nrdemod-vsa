@@ -12,24 +12,13 @@
  *
  *   1. burst detection (windowed power threshold, same technique as the
  *      Bluetooth GFSK core)
- *   2. SYNC field acquisition via periodic autocorrelation: the SYNC
- *      preamble repeats the same ternary code every "SyncLength" symbol
- *      periods, so correlating the signal against a delayed copy of
- *      itself at the nominal preamble symbol period produces a genuine,
- *      measurable periodicity peak without needing the literal per-code
- *      ternary sequence tables (clause 15.2.6.2) - the same self-similarity
- *      principle any impulse-radio preamble detector exploits.
- *   3. carrier frequency error from the residual phase rotation across
- *      the detected SYNC period (BPSK-modulated preamble symbols cancel
- *      under magnitude-squared combining, leaving only the carrier
- *      rotation, the same trick the GFSK core's F0 estimator uses).
+ *   2. blind SYNC period acquisition using normalized energy correlation
+ *   3. carrier frequency error from complex correlation of adjacent
+ *      repetitions of the same signed preamble code
  *
- * Does not decode PHR/PSDU payload bits (ternary-code correlation,
- * Reed-Solomon/convolutional FEC and scrambling are protocol-layer
- * concerns well beyond PHY burst/sync accuracy) - deliberately scoped the
- * same way as the native Bluetooth LE core (BurstFound/SyncRho/
- * FrequencyError, matching the subset of the legacy Bebop library's own
- * RESULT set that are pure modulation-accuracy quantities).
+ * demodulate() preserves the acquisition-only interface. demodulateData()
+ * additionally decodes BPRF/802.15.4a/HPRF SFD, PHR and PSDU with SECDED,
+ * convolutional and Reed-Solomon error correction.
  *
  * Copyright by Advantest Europe GmbH
  *
@@ -44,7 +33,8 @@ namespace uwbdemod {
 
 enum PhyMode {
   BPRF = 0, // base pulse repetition frequency (499.2 MHz chip rate)
-  HPRF = 1  // high pulse repetition frequency (499.2 MHz chip rate, different burst structure)
+  HPRF = 1, // high pulse repetition frequency (499.2 MHz chip rate, different burst structure)
+  IEEE802154A = 2
 };
 
 struct Config {
@@ -57,6 +47,23 @@ struct Config {
   double syncThreshold;          // minimum normalized autocorrelation to declare sync, 0..1
 
   Config();
+};
+
+struct DataConfig {
+  int codeIndex;
+  int sfdNumber;
+  int sfdLength;                 // 802.15.4a: 8 or 64
+  int preambleSpreadingFactor;   // 0 selects the standard code-dependent value
+  double meanPrfMHz;             // 4a: 3.9/15.6/62.4; BPRF: 62.4; HPRF: 124.8/249.6
+  int phrDataRateKbps;           // BPRF: 0 (auto), 850 or 6810
+  int stsPacketConfiguration;    // 0..3; STS is skipped, not authenticated
+  int constraintLength;         // HPRF: 3 (with RS) or 7 (no RS)
+  int numStsSegments;            // HPRF: 1..4
+  int stsSegmentLength;          // HPRF: 16,32,64,128,256 units of 512 chips
+  int extraStsGapIndex;          // HPRF SP2: 0..3
+  int extraStsGapLength;         // HPRF SP2: 0..127 units of 4 chips
+
+  DataConfig();
 };
 
 struct Result {
@@ -74,9 +81,29 @@ struct Result {
 
   double frequencyErrorHz; // carrier frequency offset from the SYNC field's residual rotation
 
+  std::string dataError;
+  bool sfdFound;
+  bool phrDecoded;
+  bool psduDecoded;
+  bool rsOk;                    // not applicable (false) for HPRF CL7
+  int preambleSymbols;
+  int sfdSymbol;
+  int phrStartSamples;
+  int psduLengthBytes;
+  int dataRateKbps;
+  int rsCorrectedSymbols;
+  double evmDb;                 // matched burst/group correlation EVM, not VSA chip NRMSE
+  std::vector<int> phrBits;      // 13 SECDED-corrected information bits
+  std::vector<int> psduBits;
+  std::vector<int> psduBytes;
+  std::vector<int> burstPositions;
+  std::vector<double> softBits;  // two metrics/symbol; HPRF CL3 first metric is g0 XOR g1
+
   Result();
 };
 
 Result demodulate(const std::vector<std::complex<double> >& iq, const Config& config);
+Result demodulateData(const std::vector<std::complex<double> >& iq, const Config& config,
+                     const DataConfig& dataConfig);
 
 }

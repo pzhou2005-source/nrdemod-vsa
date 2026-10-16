@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import ctypes
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 import numpy as np
 
@@ -25,6 +25,7 @@ from ._demod_ffi import DemodConfig, lib
 __all__ = [
     "Config",
     "WifiBeDataConfig",
+    "UwbHrpDataConfig",
     "Result",
     "demodulate",
     "version",
@@ -175,7 +176,7 @@ class Result:
         out = dict(self._scalars)
         out["ok"] = self.ok
         out["error"] = self.error
-        if self.family == WIFI_BE:
+        if self.family in (WIFI_BE, UWB_HRP):
             out["dataError"] = self.dataError
         out["family"] = _FAMILY_NAMES.get(self.family, "?")
         if include_vectors:
@@ -213,8 +214,30 @@ class WifiBeDataConfig:
     numDataSymbols: int = 4
 
 
+@dataclass
+class UwbHrpDataConfig:
+    """Full HRP decoding; Config.phyMode is 0=BPRF, 1=HPRF, 2=4a.
+
+    Sample rate must be an integer 2..32 times chipRateHz. STS is skipped,
+    not authenticated. SP3 has no payload; inspect sfdFound instead.
+    """
+
+    codeIndex: int = 9
+    sfdNumber: int = 0
+    sfdLength: int = 8
+    preambleSpreadingFactor: int = 0
+    meanPrfMHz: float = 62.4
+    phrDataRateKbps: int = 0
+    stsPacketConfiguration: int = 0
+    constraintLength: int = 3
+    numStsSegments: int = 1
+    stsSegmentLength: int = 64
+    extraStsGapIndex: int = 0
+    extraStsGapLength: int = 0
+
+
 def demodulate(family: int, iq, config: Optional[Config] = None,
-               *, data_config: Optional[WifiBeDataConfig] = None, **overrides) -> Result:
+               *, data_config: Optional[Union[WifiBeDataConfig, UwbHrpDataConfig]] = None, **overrides) -> Result:
     """Demodulates a complex baseband capture with the given family's native core.
 
     ``family`` is one of the module-level constants (WIFI_A, WIFI_N, ...).
@@ -223,6 +246,9 @@ def demodulate(family: int, iq, config: Optional[Config] = None,
     Check ``dataEvmValid`` before reading ``evmRmsData`` (a ratio, not percent);
     invalid EVM is absent and ``dataError`` describes the DATA failure.
     This path does not decode EHT signaling or recover payload bits.
+    For UWB_HRP, UwbHrpDataConfig enables native packet decoding:
+    check psduDecoded and dataError; psduBytes contains recovered octets.
+    rsOk applies to BPRF/4a/HPRF CL3 only; HPRF CL7 has no RS outer code.
     """
     cfg = Config() if config is None else config
     if overrides:
@@ -233,9 +259,16 @@ def demodulate(family: int, iq, config: Optional[Config] = None,
     raw = cfg._to_c(family)
 
     ptr = flat.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) if num_samples else None
-    if data_config is not None:
-        if family != WIFI_BE:
-            raise ValueError("data_config is supported only for WIFI_BE")
+    if isinstance(data_config, UwbHrpDataConfig):
+        if family != UWB_HRP:
+            raise ValueError("UwbHrpDataConfig requires UWB_HRP")
+        if not hasattr(lib, "demod_uwb_hrp_data"):
+            raise RuntimeError("Rebuild the demod library to enable UWB payload decoding")
+        data_raw = _ffi.UwbHrpDataConfig(**data_config.__dict__)
+        handle = lib.demod_uwb_hrp_data(ptr, num_samples, ctypes.byref(raw), ctypes.byref(data_raw))
+    elif data_config is not None:
+        if family != WIFI_BE or not isinstance(data_config, WifiBeDataConfig):
+            raise ValueError("WifiBeDataConfig requires WIFI_BE")
         if not hasattr(lib, "demod_wifi_be_data"):
             raise RuntimeError("Rebuild the demod library to enable Wi-Fi 7 DATA EVM")
         data_raw = _ffi.WifiBeDataConfig(**data_config.__dict__)

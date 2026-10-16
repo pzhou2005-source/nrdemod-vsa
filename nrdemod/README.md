@@ -173,7 +173,27 @@ res_le_coded = demod.demodulate(demod.BT_LE, iq, le_coded_cfg)
 
 uwb_cfg = demod.Config(sampleRate=999.36e6)
 res_uwb = demod.demodulate(demod.UWB_HRP, iq, uwb_cfg)
+
+# Full BPRF PHR/PSDU decoding; HPRF CL3/CL7 and 802.15.4a also supported.
+packet = demod.demodulate(
+    demod.UWB_HRP, iq, demod.Config(sampleRate=1996.8e6, phyMode=0),
+    data_config=demod.UwbHrpDataConfig(codeIndex=9, meanPrfMHz=62.4),
+)
+if not packet.ok or not packet.psduDecoded:
+    raise RuntimeError(packet.error or packet.dataError)
+payload = bytes(packet.psduBytes.tolist())
 ```
+
+UWB's acquisition-only entrypoint remains compatible. The explicit data
+entrypoint adds matched filtering, code/SFD validation, SECDED, soft K3/K7
+Viterbi and RS(63,55) correction. Inspect `psduDecoded` and `dataError`, not
+just `ok`; `rsOk` is not applicable to HPRF CL7. SP3 has no payload.
+STS is skipped, not authenticated, and MAC FCS is not checked. The data path
+requires an integer 2..32 samples per 499.2-MHz chip. Configure HPRF with
+`phyMode=1`, code 25..32, `meanPrfMHz=124.8` or `249.6`, SFD 1..4 and
+`constraintLength=3` or `7`; `phyMode=2` selects 802.15.4a.
+Native decoder implementation is in `src/UwbHrpData.cpp`, linked alongside
+the legacy acquisition implementation in `src/UwbHrpCore.cpp`.
 
 Family constants: `WIFI_A`, `WIFI_N`, `WIFI_AC`, `WIFI_AX`, `WIFI_AD`, `WIFI_B`,
 `WIFI_BE`, `BT_LE`, `UWB_HRP`. Each core's scope is documented in its header

@@ -75,7 +75,7 @@ enum DemodStatus {
  *   phy, modulationIndex, accessAddress
  *       - DEMOD_BT_LE only. phy: 1 = LE1M, 2 = LE2M.
  *   phyMode, syncLength, chipRateHz
- *       - DEMOD_UWB_HRP only. phyMode: 0 = BPRF, 1 = HPRF.
+ *       - DEMOD_UWB_HRP only. phyMode: 0 = BPRF, 1 = HPRF, 2 = 802.15.4a.
  */
 typedef struct DemodConfig {
   int      abiVersion; /* must be DEMOD_ABI_VERSION */
@@ -107,6 +107,27 @@ typedef struct DemodWifiBeDataConfig {
   int dataGuardIntervalSamples;
   int numDataSymbols;
 } DemodWifiBeDataConfig;
+
+typedef struct DemodUwbHrpDataConfig {
+  int codeIndex;
+  int sfdNumber;
+  int sfdLength;
+  int preambleSpreadingFactor;
+  double meanPrfMHz;
+  int phrDataRateKbps;
+  int stsPacketConfiguration;
+  int constraintLength;
+  int numStsSegments;
+  int stsSegmentLength;
+  int extraStsGapIndex;
+  int extraStsGapLength;
+} DemodUwbHrpDataConfig;
+
+/** Full BPRF/802.15.4a/HPRF decoding. Inspect sfdFound, phrDecoded, psduDecoded,
+ * rsOk (not applicable to HPRF CL7) and demod_result_data_error(); result_ok alone is acquisition status.
+ * SP3 has no PHR/PSDU. STS is skipped, not authenticated. */
+DEMOD_API DemodResult* DEMOD_CALL demod_uwb_hrp_data(const float* iq, size_t numSamples,
+    const DemodConfig* cfg, const DemodUwbHrpDataConfig* dataCfg);
 
 DEMOD_API DemodResult* DEMOD_CALL demod_wifi_be_data(const float* iq, size_t numSamples,
     const DemodConfig* cfg, const DemodWifiBeDataConfig* dataCfg);
@@ -142,8 +163,8 @@ DEMOD_API int DEMOD_CALL demod_result_get_int(const DemodResult* r, const char* 
 DEMOD_API int DEMOD_CALL demod_result_get_bool(const DemodResult* r, const char* name, int* out);
 
 /**
- * Vector access by field name (currently only populated by DEMOD_BT_LE's
- * frequencyDeviationHz [real] and accessAddressBits [int]).
+ * Vector access by field name. UWB adds softBits [real] and phrBits, psduBits,
+ * psduBytes and burstPositions [int] for stage-by-stage inspection.
  */
 DEMOD_API long DEMOD_CALL demod_result_vector_size(const DemodResult* r, const char* name);
 DEMOD_API int  DEMOD_CALL demod_result_vector_copy(const DemodResult* r, const char* name,

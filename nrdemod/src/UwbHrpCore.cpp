@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace uwbdemod {
 
@@ -55,12 +56,9 @@ bool findBurst(const std::vector<std::complex<double> >& iq, double thresholdDb,
 }
 
 // Normalized periodic autocorrelation of the pulse ENERGY (not raw IQ) at a given lag over
-// [start, start+windowLen): consecutive SYNC preamble repetitions carry the same ternary pulse
-// POSITIONS (IEEE 802.15.4z clause 15.2.6.2) but each repetition's pulses are independently
-// BPSK data-modulated, so the complex phase differs between repetitions and raw-IQ correlation
-// cancels (verified against real TDC captures: raw-IQ rho stayed <0.01 even on a confirmed-sync
-// capture). The pulse energy |x[n]|^2 is phase invariant and genuinely periodic, giving a real,
-// strong correlation peak (rho > 0.5 on real captures) at the true preamble symbol period.
+// [start, start+windowLen). SHR repeats the same signed ternary code; energy correlation
+// avoids carrier rotation during the blind period search. The code-aware data receiver
+// separately checks the complex preamble and SFD before attempting packet decoding.
 //
 // Takes a precomputed power[] (= |iq|^2) and prefixPowerSq (running sum of power[i]^2) so the
 // caller can build both ONCE outside the lag-search loop below instead of this function
@@ -125,15 +123,49 @@ Result::Result()
       syncRho(0.0),
       syncPositionSamples(0),
       preambleSymbolPeriodSamples(0.0),
-      frequencyErrorHz(0.0)
+      frequencyErrorHz(0.0),
+      sfdFound(false),
+      phrDecoded(false),
+      psduDecoded(false),
+      rsOk(false),
+      preambleSymbols(0),
+      sfdSymbol(-1),
+      phrStartSamples(0),
+      psduLengthBytes(0),
+      dataRateKbps(0),
+      rsCorrectedSymbols(0),
+      evmDb(std::numeric_limits<double>::quiet_NaN())
 {
 }
 
 Result demodulate(const std::vector<std::complex<double> >& iq, const Config& config)
 {
   Result result;
-  if (iq.empty() || config.sampleRate <= 0.0) {
-    result.error = "empty capture or invalid sample rate";
+  if (iq.empty() || iq.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    result.error = "empty or oversized capture";
+    return result;
+  }
+  if (!std::isfinite(config.sampleRate) || config.sampleRate <= 0.0 ||
+      !std::isfinite(config.chipRateHz) || config.chipRateHz <= 0.0 ||
+      !std::isfinite(config.syncThreshold) || config.syncThreshold <= 0.0 || config.syncThreshold > 1.0 ||
+      !std::isfinite(config.burstSearchThresholdDb) || config.burstSearchThresholdDb < 0.0 ||
+      config.syncLength < 2 || config.syncLength > 4096 ||
+      config.phyMode < BPRF || config.phyMode > IEEE802154A ||
+      config.sampleRate / config.chipRateHz > 1024.0) {
+    result.error = "invalid HRP acquisition configuration";
+    return result;
+  }
+  double inputEnergy = 0.0;
+  for (size_t i = 0; i < iq.size(); ++i) {
+    if (!std::isfinite(iq[i].real()) || !std::isfinite(iq[i].imag()) ||
+        !std::isfinite(std::norm(iq[i]))) {
+      result.error = "non-finite IQ sample";
+      return result;
+    }
+    inputEnergy += std::norm(iq[i]);
+  }
+  if (!(inputEnergy > 0.0) || !std::isfinite(inputEnergy)) {
+    result.error = "capture has zero or invalid energy";
     return result;
   }
 
@@ -151,9 +183,7 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
   result.burstLength = burstLength;
 
   const double samplesPerChip = config.sampleRate / config.chipRateHz;
-  // IEEE 802.15.4z HRP ternary preamble codes range roughly 16..1024 chips (BPRF uses shorter
-  // codes, HPRF substantially longer); search that range in samples rather than assuming one
-  // literal code length, so this works across BPRF/HPRF variants without a hard-coded table.
+  // Blind acquisition searches an effective repeated-symbol period, including spreading.
   const int minLagSamples = std::max(1, static_cast<int>(std::llround(16 * samplesPerChip)));
   const int maxLagSamples = static_cast<int>(std::llround(1024 * samplesPerChip));
 
@@ -174,16 +204,18 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
   // PSDU of short-code frames and washes the correlation out.
   double bestMagnitude = -1.0;
   int bestLag = minLagSamples;
-  for (int lag = minLagSamples; lag <= maxLagSamples && burstStart + lag < n; ++lag) {
-    const int lagWindow = std::min(burstLength, static_cast<int>(std::llround(config.syncLength * static_cast<double>(lag))));
-    if (burstStart + lagWindow + lag > n) break;
+  for (int lag = minLagSamples; lag <= maxLagSamples && lag < n-burstStart; ++lag) {
+    const int lagWindow = static_cast<int>(std::min(static_cast<double>(burstLength),
+        config.syncLength * static_cast<double>(lag)));
+    if (lagWindow > n-burstStart-lag) break;
     const double magnitude = periodicEnergyCorrelation(power, prefixPower, prefixPowerSq, burstStart, lagWindow, lag, n);
     if (magnitude > bestMagnitude) {
       bestMagnitude = magnitude;
       bestLag = lag;
     }
   }
-  const int windowLen = std::min(burstLength, static_cast<int>(std::llround(config.syncLength * static_cast<double>(bestLag))));
+  const int windowLen = static_cast<int>(std::min(static_cast<double>(burstLength),
+      config.syncLength * static_cast<double>(bestLag)));
 
   result.preambleSymbolPeriodSamples = bestLag;
   result.syncRho = std::max(0.0, bestMagnitude);
@@ -191,10 +223,7 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
   result.syncPositionSamples = burstStart;
 
   // Carrier frequency error from the residual phase rotation over one preamble period, computed
-  // only where both repetitions carry real pulse energy (restricting to actual pulses, not the
-  // mostly-empty inter-pulse gaps, makes the phase estimate meaningful even though consecutive
-  // repetitions' BPSK data differs - see periodicEnergyCorrelation's comment for why that
-  // modulation does NOT cancel in a raw-IQ correlation the way it does in the energy domain).
+  // only where both repetitions carry real pulse energy, rather than inter-pulse noise.
   double burstPeakPower = 0.0;
   for (int i = burstStart; i < burstStart + burstLength; ++i) burstPeakPower = std::max(burstPeakPower, std::norm(iq[i]));
   const double energyThreshold = burstPeakPower * 0.1;

@@ -380,12 +380,22 @@ void testMixedSsbData()
   }
 }
 
+void setFixedEqualizerIterations(const char* value)
+{
+#ifdef _WIN32
+  CHECK(_putenv_s("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS", value ? value : "") == 0);
+#else
+  CHECK((value ? setenv("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS", value, 1) :
+                 unsetenv("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS")) == 0);
+#endif
+}
+
 void testDftsDcAndFractionalTiming()
 {
   const char* fixedIterations = std::getenv("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS");
   const bool hadFixedIterations = fixedIterations != nullptr;
   const std::string savedFixedIterations = fixedIterations ? fixedIterations : "";
-  unsetenv("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS");
+  setFixedEqualizerIterations(nullptr);
   const Modulation modulations[] = {MOD_QAM16, MOD_QAM64, MOD_QAM256};
   for (const int numerology : {1, 4}) {
     for (const Modulation modulation : modulations) {
@@ -428,9 +438,9 @@ void testDftsDcAndFractionalTiming()
           auto impairedCapture = capture;
           addNoiseAndOffsets(impairedCapture, noise, 0.02, cfg.fftSize, 0.2, 7171u);
           const Result adaptive = demodulate(impairedCapture.data(), impairedCapture.size(), cfg);
-          setenv("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS", "1", 1);
+          setFixedEqualizerIterations("1");
           const Result fixed = demodulate(impairedCapture.data(), impairedCapture.size(), cfg);
-          unsetenv("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS");
+          setFixedEqualizerIterations(nullptr);
           CHECK(adaptive.ok && fixed.ok);
           CHECK(adaptive.numSymbols == fixed.numSymbols);
           CHECK_NEAR(adaptive.rmsEvmPercent, fixed.rmsEvmPercent, 1e-4);
@@ -473,7 +483,7 @@ void testDftsDcAndFractionalTiming()
     }
   }
   if (hadFixedIterations)
-    setenv("NR_DEMOD_FIXED_EQUALIZER_ITERATIONS", savedFixedIterations.c_str(), 1);
+    setFixedEqualizerIterations(savedFixedIterations.c_str());
 }
 
 struct Impairment {

@@ -44,6 +44,10 @@ struct DemodResult {
     bool syncWordFound;
     bool isCckDataRate;
     bool dataEvmValid;
+    bool sfdFound;
+    bool phrDecoded;
+    bool psduDecoded;
+    bool rsOk;
   } b;
   struct {
     int burstStart;
@@ -64,6 +68,11 @@ struct DemodResult {
     int numSyncSymbolsMeasured;
     int numDataSymbolsMeasured;
     int symbolTimingPhase;
+    int preambleSymbols;
+    int sfdSymbol;
+    int phrStartSamples;
+    int dataRateKbps;
+    int rsCorrectedSymbols;
   } i;
   struct {
     double syncRho;
@@ -79,10 +88,13 @@ struct DemodResult {
     double samplesPerSymbol;
     double preambleSymbolPeriodSamples;
     double evmRmsData;
+    double evmDb;
   } d;
 
   std::vector<double> frequencyDeviationHz;
   std::vector<int> accessAddressBits;
+  std::vector<double> softBits;
+  std::vector<int> phrBits, psduBits, psduBytes, burstPositions;
 };
 
 namespace {
@@ -303,6 +315,23 @@ DemodResult* fromUwb(const uwbdemod::Result& r)
   out->d.syncRho = r.syncRho;
   out->d.frequencyErrorHz = r.frequencyErrorHz;
   out->d.preambleSymbolPeriodSamples = r.preambleSymbolPeriodSamples;
+  out->dataError = r.dataError;
+  out->b.sfdFound = r.sfdFound;
+  out->b.phrDecoded = r.phrDecoded;
+  out->b.psduDecoded = r.psduDecoded;
+  out->b.rsOk = r.rsOk;
+  out->i.preambleSymbols = r.preambleSymbols;
+  out->i.sfdSymbol = r.sfdSymbol;
+  out->i.phrStartSamples = r.phrStartSamples;
+  out->i.psduLengthBytes = r.psduLengthBytes;
+  out->i.dataRateKbps = r.dataRateKbps;
+  out->i.rsCorrectedSymbols = r.rsCorrectedSymbols;
+  out->d.evmDb = r.evmDb;
+  out->softBits = r.softBits;
+  out->phrBits = r.phrBits;
+  out->psduBits = r.psduBits;
+  out->psduBytes = r.psduBytes;
+  out->burstPositions = r.burstPositions;
   return out;
 }
 
@@ -380,6 +409,40 @@ DemodResult* run(int family, const std::complex<float>* iqf, size_t numSamples, 
 }
 
 extern "C" {
+
+DemodResult* DEMOD_CALL demod_uwb_hrp_data(const float* samples, size_t numSamples,
+    const DemodConfig* input, const DemodUwbHrpDataConfig* data)
+{
+  if (!input || !data || (!samples && numSamples)) return fail(DEMOD_UWB_HRP, "null argument");
+  if (input->abiVersion != DEMOD_ABI_VERSION) return fail(DEMOD_UWB_HRP, "DemodConfig ABI version mismatch");
+  try {
+    uwbdemod::Config cfg;
+    fillCommon(cfg, input);
+    cfg.phyMode = input->phyMode;
+    cfg.syncLength = input->syncLength;
+    cfg.chipRateHz = input->chipRateHz;
+    uwbdemod::DataConfig dc;
+    dc.codeIndex = data->codeIndex;
+    dc.sfdNumber = data->sfdNumber;
+    dc.sfdLength = data->sfdLength;
+    dc.preambleSpreadingFactor = data->preambleSpreadingFactor;
+    dc.meanPrfMHz = data->meanPrfMHz;
+    dc.phrDataRateKbps = data->phrDataRateKbps;
+    dc.stsPacketConfiguration = data->stsPacketConfiguration;
+    dc.constraintLength = data->constraintLength;
+    dc.numStsSegments = data->numStsSegments;
+    dc.stsSegmentLength = data->stsSegmentLength;
+    dc.extraStsGapIndex = data->extraStsGapIndex;
+    dc.extraStsGapLength = data->extraStsGapLength;
+    std::vector<std::complex<double> > iq(numSamples);
+    for (size_t i = 0; i < numSamples; ++i) iq[i] = std::complex<double>(samples[2*i], samples[2*i+1]);
+    return fromUwb(uwbdemod::demodulateData(iq, cfg, dc));
+  } catch (const std::exception& error) {
+    return fail(DEMOD_UWB_HRP, error.what());
+  } catch (...) {
+    return fail(DEMOD_UWB_HRP, "unknown exception");
+  }
+}
 
 DemodResult* DEMOD_CALL demod_wifi_be_data(const float* samples, size_t numSamples,
     const DemodConfig* input, const DemodWifiBeDataConfig* data)
@@ -497,6 +560,7 @@ int DEMOD_CALL demod_result_get_bool(const DemodResult* r, const char* name, int
 #define PICK(f) if (std::strcmp(name, #f) == 0) { *out = r->b.f ? 1 : 0; return DEMOD_OK; }
   PICK(burstFound) PICK(syncFound) PICK(syncWordFound) PICK(isCckDataRate)
   PICK(dataEvmValid)
+  PICK(sfdFound) PICK(phrDecoded) PICK(psduDecoded) PICK(rsOk)
 #undef PICK
   return DEMOD_ERR_UNKNOWN_KEY;
 }
@@ -510,6 +574,7 @@ int DEMOD_CALL demod_result_get_int(const DemodResult* r, const char* name, int*
   PICK(dataRateMbps) PICK(bandwidthMHz) PICK(nsts) PICK(psduLengthBytes) PICK(numDataSymbols)
   PICK(peakEvmSymbolIndex) PICK(peakEvmSubcarrierIndex) PICK(numSyncSymbolsMeasured)
   PICK(numDataSymbolsMeasured) PICK(symbolTimingPhase)
+  PICK(preambleSymbols) PICK(sfdSymbol) PICK(phrStartSamples) PICK(dataRateKbps) PICK(rsCorrectedSymbols)
 #undef PICK
   return DEMOD_ERR_UNKNOWN_KEY;
 }
@@ -526,6 +591,7 @@ int DEMOD_CALL demod_result_get_double(const DemodResult* r, const char* name, d
   PICK(syncRho) PICK(frequencyErrorHz) PICK(rmsEvmPercent) PICK(peakEvmPercent)
   PICK(dataRmsEvmPercent) PICK(dataPeakEvmPercent) PICK(syncWordRho) PICK(deltaFAvgHz)
   PICK(deltaFMaxHz) PICK(deltaFMinHz) PICK(samplesPerSymbol) PICK(preambleSymbolPeriodSamples)
+  PICK(evmDb)
 #undef PICK
   /* allow reading int fields as double for convenience */
   int iv = 0;
@@ -537,16 +603,19 @@ long DEMOD_CALL demod_result_vector_size(const DemodResult* r, const char* name)
 {
   if (r == 0 || name == 0) return DEMOD_ERR_NULL_ARG;
   if (std::strcmp(name, "frequencyDeviationHz") == 0) return static_cast<long>(r->frequencyDeviationHz.size());
+  if (std::strcmp(name, "softBits") == 0) return static_cast<long>(r->softBits.size());
   return DEMOD_ERR_UNKNOWN_KEY;
 }
 
 int DEMOD_CALL demod_result_vector_copy(const DemodResult* r, const char* name, double* dst, size_t count)
 {
   if (r == 0 || name == 0 || dst == 0) return DEMOD_ERR_NULL_ARG;
-  if (std::strcmp(name, "frequencyDeviationHz") != 0) return DEMOD_ERR_UNKNOWN_KEY;
-  if (count < r->frequencyDeviationHz.size()) return DEMOD_ERR_SIZE;
-  if (!r->frequencyDeviationHz.empty())
-    std::memcpy(dst, &r->frequencyDeviationHz[0], r->frequencyDeviationHz.size() * sizeof(double));
+  const std::vector<double>* values = 0;
+  if (std::strcmp(name, "frequencyDeviationHz") == 0) values = &r->frequencyDeviationHz;
+  if (std::strcmp(name, "softBits") == 0) values = &r->softBits;
+  if (!values) return DEMOD_ERR_UNKNOWN_KEY;
+  if (count < values->size()) return DEMOD_ERR_SIZE;
+  if (!values->empty()) std::memcpy(dst, &(*values)[0], values->size() * sizeof(double));
   return DEMOD_OK;
 }
 
@@ -554,16 +623,23 @@ long DEMOD_CALL demod_result_ivector_size(const DemodResult* r, const char* name
 {
   if (r == 0 || name == 0) return DEMOD_ERR_NULL_ARG;
   if (std::strcmp(name, "accessAddressBits") == 0) return static_cast<long>(r->accessAddressBits.size());
+#define IVECTOR_SIZE(f) if (std::strcmp(name, #f) == 0) return static_cast<long>(r->f.size());
+  IVECTOR_SIZE(phrBits) IVECTOR_SIZE(psduBits) IVECTOR_SIZE(psduBytes) IVECTOR_SIZE(burstPositions)
+#undef IVECTOR_SIZE
   return DEMOD_ERR_UNKNOWN_KEY;
 }
 
 int DEMOD_CALL demod_result_ivector_copy(const DemodResult* r, const char* name, int* dst, size_t count)
 {
   if (r == 0 || name == 0 || dst == 0) return DEMOD_ERR_NULL_ARG;
-  if (std::strcmp(name, "accessAddressBits") != 0) return DEMOD_ERR_UNKNOWN_KEY;
-  if (count < r->accessAddressBits.size()) return DEMOD_ERR_SIZE;
-  if (!r->accessAddressBits.empty())
-    std::memcpy(dst, &r->accessAddressBits[0], r->accessAddressBits.size() * sizeof(int));
+  const std::vector<int>* values = 0;
+#define IVECTOR_PICK(f) if (std::strcmp(name, #f) == 0) values = &r->f;
+  IVECTOR_PICK(accessAddressBits) IVECTOR_PICK(phrBits) IVECTOR_PICK(psduBits)
+  IVECTOR_PICK(psduBytes) IVECTOR_PICK(burstPositions)
+#undef IVECTOR_PICK
+  if (!values) return DEMOD_ERR_UNKNOWN_KEY;
+  if (count < values->size()) return DEMOD_ERR_SIZE;
+  if (!values->empty()) std::memcpy(dst, &(*values)[0], values->size() * sizeof(int));
   return DEMOD_OK;
 }
 
@@ -581,6 +657,7 @@ const char* DEMOD_CALL demod_field_names(int family, int kind)
         case DEMOD_WIFI_B: return boolFieldsB;
         case DEMOD_BT_LE: return boolFieldsBt;
         case DEMOD_WIFI_BE: return "burstFound\0syncFound\0dataEvmValid\0";
+        case DEMOD_UWB_HRP: return "burstFound\0syncFound\0sfdFound\0phrDecoded\0psduDecoded\0rsOk\0";
         default: return boolFieldsCommon;
       }
     case 1: /* int */
@@ -600,7 +677,8 @@ const char* DEMOD_CALL demod_field_names(int family, int kind)
         case DEMOD_WIFI_B: return "burstStart\0burstLength\0timingOffsetSamples\0"
                                    "numSyncSymbolsMeasured\0numDataSymbolsMeasured\0";
         case DEMOD_BT_LE: return "burstStart\0burstLength\0syncPositionSamples\0symbolTimingPhase\0";
-        case DEMOD_UWB_HRP: return "burstStart\0burstLength\0syncPositionSamples\0";
+        case DEMOD_UWB_HRP: return "burstStart\0burstLength\0syncPositionSamples\0preambleSymbols\0"
+                                   "sfdSymbol\0phrStartSamples\0psduLengthBytes\0dataRateKbps\0rsCorrectedSymbols\0";
         default: return "\0";
       }
     case 2: /* double */
@@ -615,12 +693,14 @@ const char* DEMOD_CALL demod_field_names(int family, int kind)
                                    "dataRmsEvmPercent\0dataPeakEvmPercent\0";
         case DEMOD_BT_LE: return "syncWordRho\0frequencyErrorHz\0deltaFAvgHz\0deltaFMaxHz\0"
                                   "deltaFMinHz\0samplesPerSymbol\0";
-        case DEMOD_UWB_HRP: return "syncRho\0frequencyErrorHz\0preambleSymbolPeriodSamples\0";
+        case DEMOD_UWB_HRP: return "syncRho\0frequencyErrorHz\0preambleSymbolPeriodSamples\0evmDb\0";
         default: return "\0";
       }
     case 3: /* vector<double> */
+      if (family == DEMOD_UWB_HRP) return "softBits\0";
       return (family == DEMOD_BT_LE) ? "frequencyDeviationHz\0" : "\0";
     case 4: /* vector<int> */
+      if (family == DEMOD_UWB_HRP) return "phrBits\0psduBits\0psduBytes\0burstPositions\0";
       return (family == DEMOD_BT_LE) ? "accessAddressBits\0" : "\0";
     default:
       return "\0";
