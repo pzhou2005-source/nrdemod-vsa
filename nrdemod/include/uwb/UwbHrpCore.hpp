@@ -2,7 +2,7 @@
 /**
  ****************************************************************************
  *
- * Native UWB (IEEE 802.15.4z HRP) impulse-radio burst/preamble demodulator
+ * Native UWB (802.15.4z BPRF/HPRF, 802.15.4ab draft EHPRF) burst/preamble demodulator
  * core.
  *
  * Pure C++ / STL: no libdemod, UNO or MKL dependency, mirrors the
@@ -44,7 +44,8 @@ namespace uwbdemod {
 
 enum PhyMode {
   BPRF = 0, // base pulse repetition frequency (499.2 MHz chip rate)
-  HPRF = 1  // high pulse repetition frequency (499.2 MHz chip rate, different burst structure)
+  HPRF = 1, // high pulse repetition frequency (499.2 MHz chip rate, different burst structure)
+  EHPRF = 2
 };
 
 struct Config {

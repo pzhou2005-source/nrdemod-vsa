@@ -37,6 +37,9 @@ __all__ = [
     "WIFI_BE",
     "BT_LE",
     "UWB_HRP",
+    "UWB_BPRF",
+    "UWB_HPRF",
+    "UWB_EHPRF",
 ]
 
 (
@@ -50,6 +53,8 @@ __all__ = [
     BT_LE,
     UWB_HRP,
 ) = range(9)
+
+UWB_BPRF, UWB_HPRF, UWB_EHPRF = range(3)
 
 _FAMILY_NAMES = {
     WIFI_A: "802.11a",
@@ -80,7 +85,12 @@ def version() -> str:
 @dataclass
 class Config:
     """Demodulator settings, shared across every family (see demod_c.h for
-    which fields each family actually reads)."""
+    which fields each family actually reads).
+
+    UWB phyMode selects UWB_BPRF, UWB_HPRF, or UWB_EHPRF. All three
+    provide burst/preamble synchronization and CFO, not payload decoding.
+    These native mode values differ from waveform sidecar/VSA numbering.
+    """
 
     sampleRate: float = 0.0
     burstSearch: bool = True
@@ -89,7 +99,7 @@ class Config:
     phy: int = 1  # LE_1M
     modulationIndex: float = 0.5
     accessAddress: int = 0x71764129
-    phyMode: int = 0  # BPRF
+    phyMode: int = UWB_BPRF
     syncLength: int = 64
     chipRateHz: float = 499.2e6
 

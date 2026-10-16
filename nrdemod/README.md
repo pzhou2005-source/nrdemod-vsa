@@ -175,6 +175,15 @@ uwb_cfg = demod.Config(sampleRate=999.36e6)
 res_uwb = demod.demodulate(demod.UWB_HRP, iq, uwb_cfg)
 ```
 
+For 802.15.4ab draft EHPRF preamble synchronization and CFO estimation, use
+`demod.Config(sampleRate=fs, phyMode=demod.UWB_EHPRF, syncLength=64)`.
+The native mode values are `UWB_BPRF=0`, `UWB_HPRF=1`, and `UWB_EHPRF=2`;
+they are not the waveform sidecar/VSA mode numbers. C callers use
+`DEMOD_UWB_BPRF`, `DEMOD_UWB_HPRF`, or `DEMOD_UWB_EHPRF` in `DemodConfig.phyMode`.
+EHPRF uses the periodic preamble receiver at the configured chip/sample rates.
+It does not decode dynamic PHR, BCC/LDPC, STS, or PSDU payloads. ABI version 1
+and the existing configuration layout are unchanged.
+
 Family constants: `WIFI_A`, `WIFI_N`, `WIFI_AC`, `WIFI_AX`, `WIFI_AD`, `WIFI_B`,
 `WIFI_BE`, `BT_LE`, `UWB_HRP`. Each core's scope is documented in its header
 under `include/<family>/`; several (802.11ax/ad/be) are deliberately

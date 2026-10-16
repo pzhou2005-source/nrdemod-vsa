@@ -51,7 +51,13 @@ enum DemodFamily {
   DEMOD_WIFI_B  = 5, /* 802.11b DSSS/CCK, Barker sync + CCK DATA EVM */
   DEMOD_WIFI_BE = 6, /* 802.11be (EHT), burst/sync/CFO only */
   DEMOD_BT_LE   = 7, /* Bluetooth LE1M/LE2M GFSK */
-  DEMOD_UWB_HRP = 8  /* 802.15.4z HRP-UWB */
+  DEMOD_UWB_HRP = 8  /* HRP-UWB BPRF/HPRF/EHPRF, burst/sync/CFO only */
+};
+
+enum DemodUwbPhyMode {
+  DEMOD_UWB_BPRF = 0,
+  DEMOD_UWB_HPRF = 1,
+  DEMOD_UWB_EHPRF = 2
 };
 
 enum DemodStatus {
@@ -75,7 +81,8 @@ enum DemodStatus {
  *   phy, modulationIndex, accessAddress
  *       - DEMOD_BT_LE only. phy: 1 = LE1M, 2 = LE2M.
  *   phyMode, syncLength, chipRateHz
- *       - DEMOD_UWB_HRP only. phyMode: 0 = BPRF, 1 = HPRF.
+ *       - DEMOD_UWB_HRP only. phyMode: DemodUwbPhyMode (0/1/2).
+ *         EHPRF supports burst/preamble/CFO only, not PHR/PSDU/FEC decoding.
  */
 typedef struct DemodConfig {
   int      abiVersion; /* must be DEMOD_ABI_VERSION */

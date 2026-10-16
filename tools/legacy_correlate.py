@@ -21,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import numpy as np
 from scipy.io import savemat
@@ -32,8 +33,13 @@ _ROOT = os.path.normpath(os.path.join(_HERE, ".."))
 _PLAIN = os.path.join(_ROOT, "captures", "tdc_reference_plaintext")
 _REF = os.path.join(_ROOT, "captures", "tdc_reference")
 _OUT = os.path.join(_ROOT, "reports")
-_SIGNALS = r"C:\Program Files\Keysight\89600 Software 2023\89600 VSA Software\Help\Signals"
-_VSA_EXE = r"C:\Program Files\Keysight\89600 Software 2023\89600 VSA Software\Agilent.SA.Vsa.Vector-x64.exe"
+_VSA_INSTALLS = sorted(Path(os.environ.get("ProgramFiles", r"C:\Program Files")).glob(
+    "Keysight/89600 Software */89600 VSA Software"), reverse=True)
+_VSA_HOME = next((directory for directory in _VSA_INSTALLS
+                  if (directory / "Agilent.SA.Vsa.Vector-x64.exe").is_file()),
+                 Path(r"C:\Program Files\Keysight\89600 Software 2023\89600 VSA Software"))
+_SIGNALS = str(_VSA_HOME / "Help" / "Signals")
+_VSA_EXE = str(_VSA_HOME / "Agilent.SA.Vsa.Vector-x64.exe")
 
 _DEMOD_OFDM, _DEMOD_DSSS, _DEMOD_OFDM11N, _DEMOD_DIGITAL = 5, 6, 13, 2
 BLUETOOTH = ("BluetoothBdr", "BluetoothEdr", "BluetoothLe1M", "BluetoothLe2M", "BluetoothLeCodedS8")
@@ -45,7 +51,9 @@ FAMILIES = {
     "802.11b": {"demod": _DEMOD_DSSS},
     "802.11n": {"demod": _DEMOD_OFDM11N},
     "802.11ac": {"demod": _DEMOD_OFDM11N},
-    "802.15.4z_HrpUwb": {"setx": os.path.join(_SIGNALS, "HrpUwb", "HrpUwb_Ch1_Code2_L64_Sync64_Sfd8.setx")},
+    "802.15.4z_HrpUwb": {"setx": next((str(path) for path in sorted(
+        (Path(_SIGNALS) / "HrpUwb").glob("HrpUwb_*.setx"))),
+        os.path.join(_SIGNALS, "HrpUwb", "HrpUwb_Ch1_Code2_L64_Sync64_Sfd8.setx"))},
     "NbIotDl": {"setx": os.path.join(_SIGNALS, "NBIoT", "NBIoT_DL_StandAlone.setx")},
     "NbIotUl": {"setx": os.path.join(_SIGNALS, "NBIoT", "NBIoT_UL_NPUSCH_1T_2RU_2Rep.setx")},
     **{d: {"demod": _DEMOD_DIGITAL} for d in BLUETOOTH},
@@ -228,15 +236,63 @@ def apply_demod_settings(meas, family, stem) -> None:
         d.PulseSearch = True  # without it the demod never finds the short burst
 
 
+def _uwb_setup_patches(stem) -> dict:
+    para = Path(_REF) / "802.15.4z_HrpUwb" / (stem + ".para2")
+    generated = not para.exists()
+    if generated:
+        para = Path(_ROOT) / "captures/generated/uwb" / (stem + ".para2")
+    with para.open(newline="", encoding="utf-8-sig") as stream:
+        parameters = {row[1].strip(): row[3].strip() for row in csv.reader(stream, skipinitialspace=True)
+                      if len(row) >= 4 and row[0].strip() == "INPUT"}
+    mode = int(parameters["PhyMode"])
+    if mode == 3:
+        raise NotImplementedError("89600 2026_U2 HRP-UWB supports NonErdev/BPRF/HPRF, not 802.15.4ab EHPRF")
+    if mode not in (0, 1, 2):
+        raise ValueError(f"Unsupported VSA UWB PHY mode: {mode}")
+    sync_values = {16: 0, 64: 1, 1024: 2, 4096: 3, 24: 4, 32: 5, 48: 6,
+                   96: 7, 128: 8, 256: 9, 512: 10}
+    delta_values = {4: 0, 16: 1, 64: 2}
+    packet_config = int(parameters["StsPacketConfig"])
+    octets = re.search(r"_FrameLeng(\d+)", stem)
+    patches = {"DemodHrpUwbPhyMode": mode,
+               "DemodHrpUwbStsPacketConfig": packet_config,
+               "DemodHrpUwbSHRCodeIndex": int(parameters["CodeIndex"]),
+               "DemodHrpUwbSHRSFDSelector": int(parameters["SfdIndex"]),
+               "DemodHrpUwbSHRSyncLength": sync_values[int(parameters["SyncLength"])],
+               "DemodHrpUwbSHRSpreading": delta_values[int(parameters["DeltaLength"])],
+               "DemodHrpUwbDataNOctets": int(parameters.get("PSDULength", octets.group(1) if octets else 0)),
+               "DemodHrpUwbDataRate": (2 if mode == 2 else 0) + int(parameters.get("PhrDataRateMode", 0))}
+    if "Channel" in parameters:
+        patches["DemodHrpUwbChannel"] = int(parameters["Channel"])
+    if generated:
+        if mode == 0:
+            patches["DemodHrpUwbStsPacketConfig"] = 0
+            patches["DemodHrpUwbDataNCpb"] = int(parameters["ChipsPerBurst"])
+            patches["DemodHrpUwbDataNHop"] = int(parameters["NumHopBursts"])
+        if packet_config and mode:
+            patches.update(DemodHrpUwbStsKey=parameters["STSKey"],
+                           DemodHrpUwbStsUpper96=parameters["STSUpper96"],
+                           DemodHrpUwbStsInitialCount=parameters["STSInitialCount"])
+        if mode == 2:
+            if int(parameters["SfdIndex"]) not in (1, 2, 3, 4):
+                raise ValueError("VSA HPRF requires SFD 1-4; regenerate this capture with gen_uwb")
+            patches["DemodHrpUwbDataRate"] = {124.8: 2, 249.6: 3}[float(parameters["MeanPRF"])]
+            patches["DemodHrpUwbSymbolRate"] = float(parameters["ChipRate"])
+    if "ConstraintLength" in parameters:
+        patches["DemodHrpUwbDataK"] = {3: 0, 7: 1}[int(parameters["ConstraintLength"])]
+    if packet_config:
+        segment_length = int(parameters.get("StsSegmentLength", parameters.get("STSSegmentLength", "64")))
+        segment_count = int(parameters.get("StsNumSegments", parameters.get("NumSTSSegments", "1")))
+        patches["DemodHrpUwbSegmentLength"] = {32: 0, 64: 1, 128: 2, 256: 3, 16: 4}[segment_length]
+        patches["DemodHrpUwbSegmentNumber"] = {1: 0, 2: 1, 3: 2, 4: 3}[segment_count]
+    return patches
+
+
 def patch_setx(family, stem, src) -> str:
     """Copies a demo setup with the keys the waveform name (or its reference) dictates."""
     patches = {}
     if family == "802.15.4z_HrpUwb":
-        m = re.match(r"802154HrpUwb_(BPRF|HPRF)_SP(\d)_Code(\d+)_Sync(\d+)_Delta(\d)_SFD(\d)(?:_PDR-\w)?(?:_FrameLeng(\d+))?", stem)
-        mode, sp, code, _sync, _delta, sfd, octets = m.groups()
-        patches = {"DemodHrpUwbPhyMode": 1 if mode == "BPRF" else 2, "DemodHrpUwbStsPacketConfig": sp,
-                   "DemodHrpUwbSHRCodeIndex": code, "DemodHrpUwbSHRSFDSelector": sfd,
-                   "DemodHrpUwbDataNOctets": octets or 0}
+        patches = _uwb_setup_patches(stem)
     if family in ("NbIotDl", "NbIotUl"):
         patches = {"DemodNBIoTEqTraining": 3}  # the reference run's equaliser training
     if family == "NbIotUl":
@@ -472,8 +528,13 @@ def run_one(spec: str, unsupported: dict) -> int:
     family, stem = spec.split("/", 1)
     wav = os.path.join(_PLAIN, family, stem + ".txt")
     para = os.path.join(_REF, family, stem + ".para2")
+    if family == "802.15.4z_HrpUwb" and not os.path.exists(wav):
+        wav = os.path.join(_ROOT, "captures", "generated", "uwb", stem + ".txt")
+        para = os.path.splitext(wav)[0] + ".para2"
     row = {"family": family, "waveform": stem}
     try:
+        if family == "802.15.4z_HrpUwb":
+            _uwb_setup_patches(stem)
         ref = parse_para2(para) if os.path.exists(para) else {}
         iq, fs, center = parse_waveform(wav)
         if family in BLUETOOTH:
@@ -497,6 +558,8 @@ def run_one(spec: str, unsupported: dict) -> int:
         row.update(compare(ref, tables, stem))
         row["vsa_all"] = json.dumps(tables)
         row["status"] = "ok" if tables else "no-results"
+    except NotImplementedError as exc:
+        row.update(status="unsupported", note=str(exc))
     except Exception as exc:  # noqa: BLE001
         row.update(status="error", note=f"{type(exc).__name__}: {exc}"[:300])
     print(json.dumps(row))

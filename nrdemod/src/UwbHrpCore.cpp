@@ -136,6 +136,10 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
     result.error = "empty capture or invalid sample rate";
     return result;
   }
+  if (config.phyMode != BPRF && config.phyMode != HPRF && config.phyMode != EHPRF) {
+    result.error = "unsupported UWB PHY mode";
+    return result;
+  }
 
   int burstStart = 0, burstLength = static_cast<int>(iq.size());
   if (config.burstSearch) {

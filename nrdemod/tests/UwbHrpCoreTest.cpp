@@ -137,6 +137,47 @@ void testCarrierFrequencyErrorRecovery()
   CHECK_NEAR(result.frequencyErrorHz, injectedOffsetHz, 5e3);
 }
 
+void testEhprfPreambleRecovery()
+{
+  CHECK(BPRF == 0);
+  CHECK(HPRF == 1);
+  CHECK(EHPRF == 2);
+  const int codeLength = 508;
+  const int repeatCount = 17;
+  for (int samplesPerChip : {2, 4}) {
+    for (double offsetHz : {-25000.0, 25000.0}) {
+      Config config;
+      config.phyMode = EHPRF;
+      config.sampleRate = config.chipRateHz * samplesPerChip;
+      config.syncLength = repeatCount - 1;
+      config.burstSearch = false;
+      const auto capture = syntheticPreamble(codeLength, samplesPerChip, repeatCount,
+          offsetHz, config.sampleRate, 0.002, 37u);
+      const Result result = demodulate(capture, config);
+      CHECK(result.ok);
+      CHECK(result.burstFound);
+      CHECK(result.syncFound);
+      CHECK(result.syncRho > 0.99);
+      CHECK_NEAR(result.preambleSymbolPeriodSamples, codeLength * samplesPerChip, 1.0);
+      CHECK(std::isfinite(result.frequencyErrorHz));
+      CHECK_NEAR(result.frequencyErrorHz, offsetHz, 100.0);
+    }
+  }
+}
+
+void testUnsupportedPhyMode()
+{
+  Config config;
+  config.sampleRate = 1996.8e6;
+  const auto capture = syntheticPreamble(32, 4, 16, 0.0, config.sampleRate, 0.02, 7u);
+  for (int mode : {-1, 3}) {
+    config.phyMode = mode;
+    const Result result = demodulate(capture, config);
+    CHECK(!result.ok);
+    CHECK(result.error == "unsupported UWB PHY mode");
+  }
+}
+
 void testNoBurstWhenCaptureIsEmpty()
 {
   Config config;
@@ -174,6 +215,8 @@ int main()
 {
   testPeriodicPreambleRecovery();
   testCarrierFrequencyErrorRecovery();
+  testEhprfPreambleRecovery();
+  testUnsupportedPhyMode();
   testNoBurstWhenCaptureIsEmpty();
   testNoiseOnlyCaptureFailsSync();
 

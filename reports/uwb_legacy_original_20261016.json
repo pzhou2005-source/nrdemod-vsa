@@ -1,0 +1,13 @@
+{
+  "family": "802.15.4z_HrpUwb",
+  "waveform": "UWB_4a_ch9_CI3_PRF15M6_6M81_PSDU100",
+  "capture": "reports/legacy_tmp/uwb_legacy_original/UWB_4a_ch9_CI3_PRF15M6_6M81_PSDU100.txt",
+  "capture_sha256": "a3aa1ddd6142f30e10aa318abd463c4eb3193b1db2daa84aa3a37773f3e19b4b",
+  "measured_utc": "2026-10-16T08:34:20.298495+00:00",
+  "status": "ok",
+  "seconds": "7.61",
+  "pass": "",
+  "vsa_all": "{\"FreqErr\": 5.001982592824111e-13, \"FreqErrPpm\": 6.262498238211277e-17, \"ChPower\": -14.362449434996478, \"TimeOffset\": 6.243892393387953e-10, \"Rmarker\": 0.0001735142472234411, \"ChipClkErr\": -4.7291001410015854e-07, \"MainLobePk\": 98.78311668046723, \"MainLobeWidth\": 1.3223366845949158e-09, \"SideLobePk\": 22.90478029949973, \"SideLobePkLoc\": -2.6977685033218434e-09, \"OverallNrmse\": 109.09265279769897, \"ShrNrmse\": 5.918576206909165e-06, \"PhrNrmse\": 13.380928337574005, \"PsduNrmse\": 343.82429122924805, \"AvgShrPower\": -14.61790396301399, \"PeakShrPower\": 1.8086449563824316, \"AvgDataPower\": -14.500581631735262, \"PeakDataPower\": 3.8004645125329963, \"ShrAvgPulseAmpl\": 0.0, \"PhrAvgPulseAmpl\": -1.8120177285204813e-06, \"PsduAvgPulseAmpl\": -10.925952071972322}",
+  "note": "Original MATLAB short-burst hopping capture; retained before compatibility export.",
+  "original_capture": "captures/generated/uwb/UWB_4a_ch9_CI3_PRF15M6_6M81_PSDU100.txt"
+}
