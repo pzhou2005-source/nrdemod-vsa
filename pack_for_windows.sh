@@ -31,7 +31,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-core="$here/../nrdemod_standalone"
+core="$here/nrdemod"
 out="$here/../nrdemod-vsa.zip"
 waveforms=""
 tdcReference=""
@@ -47,7 +47,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ! -f "$core/CMakeLists.txt" ]]; then
-  echo "error: nrdemod_standalone not found next to this workspace" >&2
+  echo "error: nrdemod source directory or workspace symlink not found" >&2
   exit 1
 fi
 if [[ -n "$waveforms" && ! -d "$waveforms" ]]; then
@@ -69,7 +69,7 @@ root="$stage/nrdemod-vsa"
 mkdir -p "$root"
 
 copy() {
-  rsync -a --exclude build --exclude .venv --exclude __pycache__ \
+  rsync -a --exclude .git --exclude build --exclude .venv --exclude __pycache__ \
         --exclude '*.egg-info' --exclude '_lib' --exclude '*.so' \
         --exclude '*.dll' --exclude '*.pyd' --exclude '*.dylib' \
         "${@:3}" "$1" "$2"

@@ -13,8 +13,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <limits>
+#include <map>
 #include <sstream>
+#include <thread>
 
 namespace nrdemod {
 
@@ -367,6 +370,16 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
   std::vector<bool> excludedFrequency(excludedSc);
   if (puncturedCarrier >= 0)
     excludedFrequency[puncturedCarrier] = true;
+  std::vector<bool> trackingExcluded(excludedSc);
+  if (!precoding) {
+    for (size_t symbol = 0; symbol < numSym; ++symbol)
+      if (!excludedSym[symbol])
+        for (size_t carrier = 0; carrier < numSc; ++carrier)
+          trackingExcluded[carrier] = trackingExcluded[carrier] || resourceMask[symbol][carrier];
+    if (std::find(trackingExcluded.begin(), trackingExcluded.end(), false) == trackingExcluded.end())
+      trackingExcluded = excludedSc;
+  }
+  const bool varyingTrackingSupport = trackingExcluded != excludedSc;
   g.channel =
       equalize ? blindChannelEstimate(y, excludedSym, excludedFrequency, !precoding, resourceMask, phaseWindowOverride)
                : std::vector<cd>(numSc, cd(1.0, 0.0));
@@ -482,6 +495,48 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
   double previousError = std::numeric_limits<double>::infinity();
   int stableIterations = 0;
   bool dataConverged = false;
+  const auto carrierGain = [&](size_t carrier, cd initialGain = cd(1.0, 0.0)) {
+    const auto gainError = [&](cd gain) {
+      double error = 0.0, reference = 0.0;
+      for (size_t symbol = 0; symbol < numSym; ++symbol) {
+        if (excludedSym[symbol] || resourceMask[symbol][carrier])
+          continue;
+        const cd measured = g.z[symbol][carrier] / gain;
+        const cd decision = decide(measured);
+        error += std::norm(measured - decision);
+        reference += std::norm(decision);
+      }
+      return reference > 0.0 ? error / reference : 0.0;
+    };
+    double bestError = gainError(initialGain);
+    cd bestGain = initialGain;
+    if (bestError > 1e-5) {
+      for (int candidate = 0; candidate <= 30; ++candidate) {
+        for (int phase = -4; phase <= 4; ++phase) {
+          cd gain = std::polar(0.65 + 0.025 * candidate, 0.05 * phase);
+          for (int refinement = 0; refinement < 3; ++refinement) {
+            cd cross(0.0, 0.0);
+            double reference = 0.0;
+            for (size_t symbol = 0; symbol < numSym; ++symbol) {
+              if (excludedSym[symbol] || resourceMask[symbol][carrier])
+                continue;
+              const cd decision = decide(g.z[symbol][carrier] / gain);
+              cross += g.z[symbol][carrier] * std::conj(decision);
+              reference += std::norm(decision);
+            }
+            if (reference > 0.0 && std::abs(cross) > 0.0)
+              gain = cross / reference;
+          }
+          const double error = gainError(gain);
+          if (error < bestError) {
+            bestError = error;
+            bestGain = gain;
+          }
+        }
+      }
+    }
+    return bestGain;
+  };
   for (int it = 0; it < iterations; ++it) {
     for (size_t l = 0; l < numSym; ++l) {
       if (dataConverged && !excludedSym[l])
@@ -524,13 +579,14 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
         // the following hard decisions are reliable for dense constellations
         cd fourth(0.0, 0.0);
         for (size_t i = 0; i < numSc; ++i) {
-          if (excludedSc[i] || resourceMask[l][i])
+          if (trackingExcluded[i] || resourceMask[l][i])
             continue;
           const cd z2 = d[i] * d[i];
           fourth += z2 * z2;
         }
         double phi = std::abs(fourth) > 0.0 ? (std::arg(fourth) - PI) / 4.0 : 0.0;
-        if ((numSc < 64 && mod != MOD_QPSK) || (precoding && mod == MOD_QAM256 && !excludedSym[l])) {
+        if ((numSc < 64 && mod != MOD_QPSK) ||
+            (mod == MOD_QAM256 && !excludedSym[l] && (precoding || varyingTrackingSupport))) {
           if (phasePickStableCount[l] >= 2) {
             // ambiguity already resolved twice in a row: trust the locked-in pick instead of
             // repeating the full O(32 * numSc) sweep every remaining iteration.
@@ -543,7 +599,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
               const cd offset = initialPunctureOffset(rotation);
               double error = 0.0;
               for (size_t carrier = 0; carrier < numSc; ++carrier) {
-                if (excludedSc[carrier] || resourceMask[l][carrier])
+                if (trackingExcluded[carrier] || resourceMask[l][carrier])
                   continue;
                 const cd measured = d[carrier] * rotation - (carrier % 2 == 0 ? offset : -offset);
                 error += std::norm(measured - decide(measured));
@@ -565,7 +621,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
         for (int refinement = 0; refinement < 8; ++refinement) {
           cd acc(0.0, 0.0);
           for (size_t i = 0; i < numSc; ++i) {
-            if (excludedSc[i] || resourceMask[l][i])
+            if (trackingExcluded[i] || resourceMask[l][i])
               continue;
             const cd z = d[i] * rot;
             acc += z * std::conj(decide(z));
@@ -601,7 +657,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
           const cd ref = precoding ? referenceFrequency[i] : decide(d[i]);
           const cd measured = precoding ? measuredFrequency[i] : d[i];
           resid[l][i] = excludedFrequency[i] || resourceMask[l][i] ? cd(0.0, 0.0) : measured * std::conj(ref);
-          if (excludedFrequency[i] || resourceMask[l][i])
+          if (excludedFrequency[i] || resourceMask[l][i] || trackingExcluded[i])
             continue;
           num += resid[l][i].real();
           den += std::norm(ref);
@@ -683,7 +739,7 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
         // re-estimate the common phase after removing the ramp
         cd acc(0.0, 0.0);
         for (size_t i = 0; i < numSc && phaseTracking; ++i) {
-          if (excludedSc[i] || resourceMask[l][i])
+          if (trackingExcluded[i] || resourceMask[l][i])
             continue;
           acc += d[i] * std::conj(decide(d[i]));
         }
@@ -774,48 +830,10 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
         den += std::norm(refFreq[l][i]);
       }
       if (!precoding && mod == MOD_QAM256 && it == 1) {
-        auto gainError = [&](cd gain) {
-          double error = 0.0, reference = 0.0;
-          for (size_t symbol = 0; symbol < numSym; ++symbol) {
-            if (excludedSym[symbol] || resourceMask[symbol][i])
-              continue;
-            const cd measured = g.z[symbol][i] / gain;
-            const cd decision = decide(measured);
-            error += std::norm(measured - decision);
-            reference += std::norm(decision);
-          }
-          return reference > 0.0 ? error / reference : 0.0;
-        };
-        double bestError = gainError(cd(1.0, 0.0));
-        cd bestGain(1.0, 0.0);
-        if (bestError > 1e-5) {
-          for (int candidate = 0; candidate <= 30; ++candidate) {
-            for (int phase = -4; phase <= 4; ++phase) {
-              cd gain = std::polar(0.65 + 0.025 * candidate, 0.05 * phase);
-              for (int refinement = 0; refinement < 3; ++refinement) {
-                cd cross(0.0, 0.0);
-                double reference = 0.0;
-                for (size_t symbol = 0; symbol < numSym; ++symbol) {
-                  if (excludedSym[symbol] || resourceMask[symbol][i])
-                    continue;
-                  const cd decision = decide(g.z[symbol][i] / gain);
-                  cross += g.z[symbol][i] * std::conj(decision);
-                  reference += std::norm(decision);
-                }
-                if (reference > 0.0 && std::abs(cross) > 0.0)
-                  gain = cross / reference;
-              }
-              const double error = gainError(gain);
-              if (error < bestError) {
-                bestError = error;
-                bestGain = gain;
-              }
-            }
-          }
-          if (std::abs(bestGain - cd(1.0, 0.0)) > 1e-9) {
-            g.channel[i] *= bestGain;
-            continue;
-          }
+        const cd bestGain = carrierGain(i);
+        if (std::abs(bestGain - cd(1.0, 0.0)) > 1e-9) {
+          g.channel[i] *= bestGain;
+          continue;
         }
       }
       if (den > 0.0 && std::abs(num) > 0.0) {
@@ -868,10 +886,34 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
         reference += std::norm(g.ref[symbol][carrier]);
       }
       if (reference > 0.0 && std::abs(cross) > 0.0) {
-        const cd gain = cross / reference;
+        const cd gain =
+            iterations == 1 && mod == MOD_QAM256 ? carrierGain(carrier, cross / reference) : cross / reference;
         g.channel[carrier] *= gain;
         for (size_t symbol = 0; symbol < numSym; ++symbol) {
           g.z[symbol][carrier] /= gain;
+          g.ref[symbol][carrier] = decide(g.z[symbol][carrier]);
+        }
+      }
+    }
+  }
+  if (equalize && iterations == 1 && calibrateSinglePass && (phaseTracking || amplitudeTracking)) {
+    for (size_t symbol = 0; symbol < numSym; ++symbol) {
+      if (excludedSym[symbol])
+        continue;
+      cd cross(0.0, 0.0);
+      double reference = 0.0;
+      for (size_t carrier = 0; carrier < numSc; ++carrier) {
+        if (excludedSc[carrier] || resourceMask[symbol][carrier])
+          continue;
+        cross += g.z[symbol][carrier] * std::conj(g.ref[symbol][carrier]);
+        reference += std::norm(g.ref[symbol][carrier]);
+      }
+      if (reference > 0.0 && std::abs(cross) > 0.0) {
+        const double amplitude = amplitudeTracking ? std::abs(cross) / reference : 1.0;
+        const cd correction = std::polar(1.0 / amplitude, phaseTracking ? -std::arg(cross) : 0.0);
+        for (size_t carrier = 0; carrier < numSc; ++carrier) {
+          g.z[symbol][carrier] *= correction;
+          corr[symbol][carrier] *= correction;
           g.ref[symbol][carrier] = decide(g.z[symbol][carrier]);
         }
       }
@@ -891,8 +933,8 @@ EqualizedGrid equalizeAndDecide(const std::vector<std::vector<cd>>& y, const std
 }
 
 DmrsConfig::DmrsConfig()
-    : exclude(true), mappingTypeB(false), typeAPosition(2), additionalPositions(0), doubleSymbol(false),
-      configurationType2(false), scramblingId(-1), nSCID(0), startSlotNumber(0)
+    : enabled(true), exclude(true), mappingTypeB(false), typeAPosition(2), additionalPositions(0), doubleSymbol(false),
+      configurationType2(false), scramblingId(-1), nSCID(0), startSlotNumber(0), powerBoostDb(0.0)
 {
 }
 
@@ -900,9 +942,10 @@ Config::Config()
     : numerology(1), fftSize(0), frequencyRange(FR1), channelBandwidthMHz(0), numResourceBlocks(0),
       resourceBlockOffset(0), extendedCp(false), modulation(MOD_AUTO), maxSymbols(0), burstSearch(true),
       burstSearchThresholdDb(-20.0), timingSearch(true), syncSearchSymbols(4), cfoCorrection(true),
-      carrierOffsetHz(0.0), equalize(true), equalizerIterations(1), phaseTracking(true), timingTracking(true),
-      amplitudeTracking(true), transformPrecoding(false), dcPunctured(false), removeIqOffset(false),
-      symbolTimingAdjustmentPercent(-3.125), resample(true), sampleRate(0.0), ssbSearch(true)
+      cpCfoGuardFraction(0.0), carrierOffsetHz(0.0), equalize(true), equalizerIterations(1), phaseTracking(true),
+      timingTracking(true), amplitudeTracking(true), transformPrecoding(false), dcPunctured(false),
+      removeIqOffset(false), removeIqOffsetAfterCfo(false), symbolTimingAdjustmentPercent(-3.125), resample(true),
+      sampleRate(0.0), ssbSearch(true)
 {
 }
 
@@ -993,6 +1036,8 @@ std::vector<int> dmrsSymbolsInSlot(const DmrsConfig& dmrs)
 {
   // PUSCH DM-RS positions for ld = 14 without intra slot frequency hopping
   std::vector<int> out;
+  if (!dmrs.enabled)
+    return out;
   const int l0 = dmrs.mappingTypeB ? 0 : (dmrs.typeAPosition == 3 ? 3 : 2);
   const int add = std::max(0, std::min(3, dmrs.additionalPositions));
   if (dmrs.doubleSymbol) {
@@ -1116,6 +1161,30 @@ std::vector<cd> resample(const std::vector<cd>& in, double fsIn, double fsOut)
   const size_t numOut = static_cast<size_t>(std::floor(static_cast<double>(in.size() - 1) / ratio)) + 1;
   std::vector<cd> out(numOut);
   const int n = static_cast<int>(in.size());
+  if (ratio > 1.0 && ratio <= n && ratio == std::floor(ratio)) {
+    std::vector<double> kernel(2 * halfWidth - 1);
+    double weight = 0.0;
+    for (int offset = -halfWidth + 1; offset < halfWidth; ++offset) {
+      const double x = 2.0 * fc * offset;
+      const double sinc = std::fabs(x) < 1e-12 ? 1.0 : std::sin(PI * x) / (PI * x);
+      const double position = static_cast<double>(offset) / halfWidth;
+      const double window = 0.42 + 0.5 * std::cos(PI * position) + 0.08 * std::cos(2.0 * PI * position);
+      const double coefficient = 2.0 * fc * sinc * window;
+      kernel[offset + halfWidth - 1] = coefficient;
+      weight += coefficient;
+    }
+    for (size_t index = 0; index < numOut; ++index) {
+      const int center = static_cast<int>(index * ratio);
+      cd accumulated(0.0, 0.0);
+      for (int offset = -halfWidth + 1; offset < halfWidth; ++offset) {
+        const int point = center + offset;
+        if (point >= 0 && point < n)
+          accumulated += in[point] * kernel[offset + halfWidth - 1];
+      }
+      out[index] = weight > 0.0 ? accumulated / weight : accumulated;
+    }
+    return out;
+  }
   for (size_t i = 0; i < numOut; ++i) {
     const double t = static_cast<double>(i) * ratio;
     const int center = static_cast<int>(std::floor(t));
@@ -1146,12 +1215,18 @@ cd hardDecision(const cd& z, Modulation mod)
   return cd(decideAxis(z.real() / s, maxLevel) * s, decideAxis(z.imag() / s, maxLevel) * s);
 }
 
+void setFftProvider(FftProviderFn fn)
+{
+  sExternalFft = fn;
+}
 
-void setFftProvider(FftProviderFn fn) { sExternalFft = fn; }
-FftProviderFn getFftProvider() { return sExternalFft; }
+FftProviderFn getFftProvider()
+{
+  return sExternalFft;
+}
 
-
-Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config& cfg)
+static Result demodulateImpl(const std::complex<float>* iq, const float* interleavedIq, size_t numSamples,
+    const Config& cfg, bool mirrorSpectrum)
 {
   Result r;
   const char* traceValue = std::getenv("XOC_DEMOD_TRACE");
@@ -1161,10 +1236,14 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
   const std::chrono::steady_clock::time_point profileStart = std::chrono::steady_clock::now();
   const auto profileMark = [&](const char* stage) {
     if (!profile) return;
-    const double milliseconds = std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - profileStart).count();
-    std::fprintf(stderr, "[demod-profile] stage=%s ms=%.3f\n", stage, milliseconds);
+    const auto now = std::chrono::steady_clock::now();
+    const double milliseconds = std::chrono::duration<double, std::milli>(now - profileStart).count();
+    const auto clockNs = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+    std::fprintf(stderr, "[demod-profile] stage=%s ms=%.3f clockNs=%lld thread=%zu invocation=%p\n", stage,
+        milliseconds, static_cast<long long>(clockNs), std::hash<std::thread::id>{}(std::this_thread::get_id()),
+        static_cast<void*>(&r));
   };
+  profileMark("enter");
   if (trace) {
     std::fprintf(stderr, "[demod-trace] core-enter samples=%zu sampleRate=%.0f mu=%d fft=%s\n",
                  numSamples, cfg.sampleRate, cfg.numerology,
@@ -1179,8 +1258,16 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
     r.error = "Extended cyclic prefix is only defined for numerology 2 (60 kHz).";
     return r;
   }
+  if (!std::isfinite(cfg.dmrs.powerBoostDb) || std::fabs(cfg.dmrs.powerBoostDb) > 60.0) {
+    r.error = "DM-RS power boost must be finite and within -60..60 dB.";
+    return r;
+  }
   if (!(cfg.sampleRate > 0.0)) {
     r.error = "Sample rate must be positive.";
+    return r;
+  }
+  if (!std::isfinite(cfg.cpCfoGuardFraction) || cfg.cpCfoGuardFraction < 0.0 || cfg.cpCfoGuardFraction >= 0.5) {
+    r.error = "CP carrier-estimation guard fraction must be finite and in the range [0, 0.5).";
     return r;
   }
   if (cfg.modulation < MOD_AUTO || cfg.modulation > MOD_QAM256) {
@@ -1206,14 +1293,22 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
   const int period = cfg.extendedCp ? 0 : (7 << cfg.numerology);
   const size_t symLen = static_cast<size_t>(N + cpNormal);
 
-  if (!iq || numSamples == 0) {
+  if ((!iq && !interleavedIq) || numSamples == 0) {
     r.error = "No waveform data supplied.";
     return r;
   }
 
-  std::vector<cd> x(numSamples);
-  for (size_t i = 0; i < numSamples; ++i) {
-    x[i] = cd(iq[i].real(), iq[i].imag());
+  const auto inputSample = [&](size_t sample) {
+    return interleavedIq ? cd(interleavedIq[2 * sample],
+                               mirrorSpectrum ? -interleavedIq[2 * sample + 1] : interleavedIq[2 * sample + 1])
+                         : cd(iq[sample].real(), iq[sample].imag());
+  };
+  const bool directEnvelope = cfg.burstSearch && numSamples > symLen && !grid.resampled && cfg.carrierOffsetHz == 0.0;
+  std::vector<cd> x;
+  if (!directEnvelope) {
+    x.reserve(numSamples);
+    for (size_t sample = 0; sample < numSamples; ++sample)
+      x.emplace_back(inputSample(sample));
   }
   if (cfg.carrierOffsetHz != 0.0) {
     const double w = -2.0 * PI * cfg.carrierOffsetHz / cfg.sampleRate;
@@ -1232,10 +1327,14 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
   r.burstStart = 0;
   r.burstLength = static_cast<int>(numSamples);
   bool burstEndDetected = !cfg.burstSearch;
-  if (cfg.burstSearch && x.size() > static_cast<size_t>(symLen)) {
-    const size_t total = x.size();
-    std::vector<double> cum(total + 1, 0.0);
-    for (size_t m = 0; m < total; ++m) cum[m + 1] = cum[m] + std::norm(x[m]);
+  bool directInputCopied = false;
+  if (cfg.burstSearch && (directEnvelope ? numSamples : x.size()) > symLen) {
+    const size_t total = directEnvelope ? numSamples : x.size();
+    std::vector<double> cum;
+    cum.reserve(total + 1);
+    cum.push_back(0.0);
+    for (size_t m = 0; m < total; ++m)
+      cum.push_back(cum[m] + std::norm(directEnvelope ? inputSample(m) : x[m]));
     // peak of the one FFT length envelope, edges located with a short (CP length)
     // window so that the burst start is known to within one CP
     const size_t win = static_cast<size_t>(N);
@@ -1273,6 +1372,12 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
         quietAfterBurst = true;
         if (boundedStart == total && segmentStart < segmentEnd && segmentEnd - segmentStart >= minimumBurst) {
           bool completeStart = segmentStart >= edge;
+          if (directEnvelope && !completeStart && x.empty()) {
+            const size_t initialLength = std::min(total, 2 * edge + cpNormal + N);
+            x.reserve(initialLength);
+            for (size_t sample = 0; sample < initialLength; ++sample)
+              x.emplace_back(inputSample(sample));
+          }
           for (size_t offset = 0; !completeStart && offset < edge; ++offset)
             completeStart = cpMetric(x, segmentStart + offset, cpNormal, N, nullptr) > 0.99;
           if (completeStart) {
@@ -1300,11 +1405,25 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
       const size_t to = std::min(total, last + margin);
       if (to - from >= static_cast<size_t>(symLen)) {
         burstOffset = from;
-        x = std::vector<cd>(x.begin() + from, x.begin() + to);
+        if (directEnvelope) {
+          x.clear();
+          x.reserve(to - from);
+          for (size_t sample = from; sample < to; ++sample)
+            x.emplace_back(inputSample(sample));
+          directInputCopied = true;
+        } else {
+          x = std::vector<cd>(x.begin() + from, x.begin() + to);
+        }
         r.burstStart = static_cast<int>(std::floor(static_cast<double>(first) * cfg.sampleRate / grid.gridRate + 0.5));
         r.burstLength = static_cast<int>(std::floor(static_cast<double>(last - first) * cfg.sampleRate / grid.gridRate + 0.5));
       }
     }
+  }
+  if (directEnvelope && !directInputCopied) {
+    x.clear();
+    x.reserve(numSamples);
+    for (size_t sample = 0; sample < numSamples; ++sample)
+      x.emplace_back(inputSample(sample));
   }
   r.burstTransitionFound = burstEndDetected;
   const size_t n = x.size();
@@ -1315,7 +1434,7 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
     if (n) { dc /= static_cast<double>(n); pwr /= static_cast<double>(n); }
     r.iqOffsetDb = pwr > 0.0 ? 10.0 * std::log10(std::norm(dc) / pwr + 1e-30) : 0.0;
     r.burstPowerDb = 10.0 * std::log10(pwr + 1e-30);
-    if (cfg.removeIqOffset) {
+    if (cfg.removeIqOffset && !cfg.removeIqOffsetAfterCfo) {
       for (size_t m = 0; m < n; ++m) x[m] -= dc;
     }
   }
@@ -1333,13 +1452,33 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
   if (cfg.timingSearch) {
     const size_t wanted = static_cast<size_t>(std::max(1, cfg.syncSearchSymbols));
     const size_t maxSyms = std::min<size_t>(wanted, (n - symLen) / symLen + 1);
+    std::vector<cd> correlations(maxSyms);
+    std::vector<double> energies(maxSyms, 0.0);
+    constexpr size_t correlationRefreshInterval = 64;
     double best = -1.0;
     for (size_t d = 0; d < symLen; ++d) {
       double metric = 0.0;
       for (size_t m = 0; m < maxSyms; ++m) {
         const size_t pos = d + m * symLen;
         if (pos + static_cast<size_t>(cpNormal + N) > n) break;
-        metric += cpMetric(x, pos, cpNormal, N, NULL);
+        if (d % correlationRefreshInterval == 0) {
+          correlations[m] = cd(0.0, 0.0);
+          energies[m] = 0.0;
+          for (int sample = 0; sample < cpNormal; ++sample) {
+            const auto& prefix = x[pos + sample];
+            const auto& suffix = x[pos + sample + N];
+            correlations[m] += prefix * std::conj(suffix);
+            energies[m] += 0.5 * (std::norm(prefix) + std::norm(suffix));
+          }
+        } else {
+          const size_t departing = pos - 1;
+          const size_t arriving = pos + static_cast<size_t>(cpNormal) - 1;
+          correlations[m] -= x[departing] * std::conj(x[departing + N]);
+          correlations[m] += x[arriving] * std::conj(x[arriving + N]);
+          energies[m] -= 0.5 * (std::norm(x[departing]) + std::norm(x[departing + N]));
+          energies[m] += 0.5 * (std::norm(x[arriving]) + std::norm(x[arriving + N]));
+        }
+        metric += std::abs(correlations[m]) / (std::max(0.0, energies[m]) + 1e-30);
       }
       if (metric > best) {
         best = metric;
@@ -1362,6 +1501,7 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
     if (cfg.maxSymbols > 0 && cfg.maxSymbols < hypSyms) hypSyms = cfg.maxSymbols;
     struct Hypothesis { size_t d; int o; double metric; };
     std::vector<Hypothesis> hyps;
+    std::map<std::pair<size_t, int>, double> timingMetrics;
     double best = -1.0;
     size_t bestIdx = 0;
     for (size_t d = dMin; d <= dMax; ++d) {
@@ -1374,7 +1514,12 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
             layoutSymbols(n, d, N, cpNormal, cpLong, period, o, hypSyms);
         double metric = 0.0;
         for (size_t j = 0; j < hyp.size(); ++j) {
-          metric += cpMetric(x, hyp[j].cpStart, hyp[j].cpLen, N, NULL);
+          const auto key = std::make_pair(hyp[j].cpStart, hyp[j].cpLen);
+          auto cached = timingMetrics.find(key);
+          if (cached == timingMetrics.end()) {
+            cached = timingMetrics.emplace(key, cpMetric(x, hyp[j].cpStart, hyp[j].cpLen, N, NULL)).first;
+          }
+          metric += cached->second;
         }
         Hypothesis h = { d, o, metric };
         hyps.push_back(h);
@@ -1443,13 +1588,17 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
       if (symbol < numSym)
         rho += metric;
       const SymbolLayout& acquired = acquisitionLayout[symbol];
-      if (acquired.cpLen > 1) {
+      const int guard = static_cast<int>(acquired.cpLen * cfg.cpCfoGuardFraction);
+      const int windowLength = acquired.cpLen - 2 * guard;
+      if (guard > 0)
+        cpMetric(x, acquired.cpStart + guard, windowLength, N, &correlation);
+      if (windowLength > 1) {
         cd prefixSum(0.0, 0.0), suffixSum(0.0, 0.0);
-        for (int sample = 0; sample < acquired.cpLen; ++sample) {
+        for (int sample = guard; sample < acquired.cpLen - guard; ++sample) {
           prefixSum += x[acquired.cpStart + sample];
           suffixSum += x[acquired.cpStart + sample + N];
         }
-        correlation -= prefixSum * std::conj(suffixSum) / static_cast<double>(acquired.cpLen);
+        correlation -= prefixSum * std::conj(suffixSum) / static_cast<double>(windowLength);
       }
       corr += correlation;
     }
@@ -1466,9 +1615,29 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
   }
 
   // FFT per symbol, extract allocated subcarriers, accumulate spectrum
+  if (cfg.removeIqOffset && cfg.removeIqOffsetAfterCfo) {
+    cd dc(0.0, 0.0);
+    double power = 0.0;
+    for (const auto& sample : x) {
+      dc += sample;
+      power += std::norm(sample);
+    }
+    dc /= static_cast<double>(n);
+    r.iqOffsetDb = power > 0.0 ? 10.0 * std::log10(std::norm(dc) * n / power + 1e-30) : 0.0;
+    for (auto& sample : x)
+      sample -= dc;
+  }
+  if ((!cfg.decisionRotations.empty() && cfg.decisionRotations.size() != numSym * numSc) ||
+      (!cfg.excludedResources.empty() && cfg.excludedResources.size() != numSym * numSc)) {
+    r.error = "Resource reference dimensions do not match the demodulated grid.";
+    return r;
+  }
   std::vector<std::vector<cd> > y(numSym, std::vector<cd>(numSc));
   std::vector<double> spectrum(N, 0.0);
   const double fftScale = 1.0 / std::sqrt(static_cast<double>(N));
+  const std::vector<int> positions = dmrsSymbolsInSlot(cfg.dmrs);
+  const int dmrsPerSlot = symbolsPerSlot(cfg.extendedCp);
+  const double dmrsAmplitude = std::pow(10.0, cfg.dmrs.powerBoostDb / 20.0);
   double power = 0.0;
   auto extractGrid = [&](double residualFrequency) {
     power = 0.0;
@@ -1500,7 +1669,12 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
       for (int i = 0; i < numSc; ++i) {
         const int bin = ((k0 + i) % N + N) % N;
         y[j][i] = buf[bin];
-        power += std::norm(buf[bin]);
+        if (!cfg.decisionRotations.empty())
+          y[j][i] *= cfg.decisionRotations[j * numSc + i];
+        const int relative = ((static_cast<int>(j) - slotStart) % dmrsPerSlot + dmrsPerSlot) % dmrsPerSlot;
+        if (std::find(positions.begin(), positions.end(), relative) != positions.end())
+          y[j][i] /= dmrsAmplitude;
+        power += std::norm(y[j][i]);
       }
     }
   };
@@ -1527,8 +1701,6 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
   // symbols excluded from the statistics: DM-RS positions and user supplied indices
   std::vector<bool> excluded(numSym, false);
   std::vector<bool> excludedFromDecisions(numSym, false);
-  const std::vector<int> positions = dmrsSymbolsInSlot(cfg.dmrs);
-  const int dmrsPerSlot = symbolsPerSlot(cfg.extendedCp);
   for (size_t j = 0; j < numSym; ++j) {
     const int rel = ((static_cast<int>(j) - slotStart) % dmrsPerSlot + dmrsPerSlot) % dmrsPerSlot;
     if (std::find(positions.begin(), positions.end(), rel) != positions.end()) {
@@ -1560,6 +1732,11 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
 
   Modulation mod = static_cast<Modulation>(cfg.modulation);
   std::vector<std::vector<bool>> resourceMask(numSym, std::vector<bool>(numSc, false));
+  if (!cfg.excludedResources.empty()) {
+    for (size_t symbol = 0; symbol < numSym; ++symbol)
+      for (int carrier = 0; carrier < numSc; ++carrier)
+        resourceMask[symbol][carrier] = cfg.excludedResources[symbol * numSc + carrier];
+  }
   std::vector<cd> phaseReference(numSc, cd(0.0, 0.0));
   if (cfg.ssbSearch && !cfg.transformPrecoding && numSc >= 240) {
     std::vector<int> sequence(127 + 7, 0);
@@ -1984,6 +2161,9 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
     r.dmrsPowerDb = pilots ? 10.0 * std::log10(pilotPow / static_cast<double>(pilots) + 1e-30) : 0.0;
   }
 
+  if (!r.dmrsSymbols.empty())
+    r.dmrsPowerDb += cfg.dmrs.powerBoostDb;
+
   // channel impulse response and phase difference between neighbouring subcarriers
   {
     const std::chrono::steady_clock::time_point dftStart = std::chrono::steady_clock::now();
@@ -2118,6 +2298,16 @@ Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config
   return r;
 }
 
+Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config& cfg)
+{
+  return demodulateImpl(iq, nullptr, numSamples, cfg, false);
+}
+
+Result demodulateInterleaved(const float* iq, size_t numSamples, const Config& cfg, bool mirrorSpectrum)
+{
+  return demodulateImpl(nullptr, iq, numSamples, cfg, mirrorSpectrum);
+}
+
 std::vector<std::complex<float> > generateTestSignal(const Config& cfg, int numSymbols,
     int leadingSamples, unsigned seed, std::vector<cd>* referenceOut)
 {
@@ -2172,6 +2362,8 @@ std::vector<std::complex<float> > generateTestSignal(const Config& cfg, int numS
         d[i] = cd(nextLevel() * s, nextLevel() * s);
         if (referenceOut) referenceOut->push_back(d[i]);
       }
+      if (isDmrs)
+        d[i] *= std::pow(10.0, cfg.dmrs.powerBoostDb / 20.0);
     }
     if (cfg.transformPrecoding && !isDmrs) {
       dft(d, false);

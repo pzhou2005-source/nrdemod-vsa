@@ -359,6 +359,7 @@ DemodResult* run(int family, const std::complex<float>* iqf, size_t numSamples, 
         cfg.phy = in->phy;
         cfg.modulationIndex = in->modulationIndex;
         cfg.accessAddress = in->accessAddress;
+        cfg.steadyFrequencyDeviation = in->steadyFrequencyDeviation != 0;
         return fromBt(btdemod::demodulate(iq, cfg));
       }
       case DEMOD_UWB_HRP: {

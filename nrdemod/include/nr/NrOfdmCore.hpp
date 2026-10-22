@@ -34,6 +34,7 @@ enum FrequencyRange {
 };
 
 struct DmrsConfig {
+  bool enabled;
   bool exclude;             // drop DM-RS symbols from EVM / equalizer statistics
   bool mappingTypeB;        // PUSCH mapping type B (type A otherwise)
   int  typeAPosition;       // l0 for mapping type A: 2 or 3
@@ -46,6 +47,7 @@ struct DmrsConfig {
   int scramblingId;    // N_ID^nSCID, 0..65535 (defaults to the cell id when not overridden)
   int nSCID;           // 0 or 1, selects which of the two scrambling ids above applies
   int startSlotNumber; // slot number (n_s,f^mu) of the capture's first symbol, for cinit
+  double powerBoostDb;
 
   DmrsConfig();
 };
@@ -65,6 +67,7 @@ struct Config {
   bool   timingSearch;      // coarse symbol timing via CP correlation
   int    syncSearchSymbols; // symbols accumulated in the coarse timing search
   bool   cfoCorrection;     // carrier frequency offset via CP correlation
+  double cpCfoGuardFraction;
   double carrierOffsetHz;   // known offset of the carrier centre from baseband DC; an NR
                             // carrier may sit half a subcarrier off the tuned centre
   bool   equalize;          // decision directed per subcarrier equalizer
@@ -75,6 +78,7 @@ struct Config {
   bool   transformPrecoding;// DFT-s-OFDM (PUSCH with transform precoding)
   bool   dcPunctured;       // DC subcarrier carries no data
   bool   removeIqOffset;    // remove IQ DC offset before demodulation
+  bool removeIqOffsetAfterCfo;
   double symbolTimingAdjustmentPercent; // FFT window shift in % of the CP (negative = earlier)
   bool   resample;          // allow resampling when Fs != fftSize * SCS
   double sampleRate;        // Hz
@@ -84,6 +88,8 @@ struct Config {
   bool ssbSearch;
   DmrsConfig dmrs;
   std::vector<int> excludedSymbols; // additional symbol indices (0 based) excluded from EVM
+  std::vector<std::complex<double>> decisionRotations;
+  std::vector<bool> excludedResources;
 
   Config();
 };
@@ -193,6 +199,7 @@ std::vector<std::complex<double> > resample(const std::vector<std::complex<doubl
 std::complex<double> hardDecision(const std::complex<double>& z, Modulation mod);
 
 Result demodulate(const std::complex<float>* iq, size_t numSamples, const Config& cfg);
+Result demodulateInterleaved(const float* iq, size_t numSamples, const Config& cfg, bool mirrorSpectrum = false);
 
 /**
  * Test helper: generate an NR burst with random symbols on the active

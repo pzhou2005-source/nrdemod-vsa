@@ -16,8 +16,11 @@
 
 #include "wifi11ax/Wifi11axOfdmCore.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 using namespace wifi11bedemod;
@@ -185,6 +188,75 @@ void testNoiseRejection()
   CHECK(!result.syncFound);
 }
 
+void testMatchedScoreReuse()
+{
+  for (unsigned seed : {7u, 23u, 99u}) {
+    for (int length : {96, 127, 128, 129, 191, 192, 193, 256, 1024, 2048, 5003}) {
+      std::vector<cd> iq = buildBePreamble(50000.0, 20.0e6, 0.001, seed);
+      iq.resize(length, cd(0.01, -0.02));
+      Config config;
+      config.sampleRate = 20.0e6;
+      config.burstSearch = false;
+      wifi11axdemod::Config referenceConfig;
+      referenceConfig.sampleRate = config.sampleRate;
+      referenceConfig.burstSearch = config.burstSearch;
+      referenceConfig.syncThreshold = config.syncThreshold;
+      const Result actual = demodulate(iq, config);
+      const wifi11axdemod::Result reference = wifi11axdemod::demodulate(iq, referenceConfig);
+      CHECK(actual.ok == reference.ok);
+      CHECK(actual.burstFound == reference.burstFound);
+      CHECK(actual.burstStart == reference.burstStart);
+      CHECK(actual.burstLength == reference.burstLength);
+      CHECK(actual.syncFound == reference.syncFound);
+      CHECK(actual.timingOffsetSamples == reference.timingOffsetSamples);
+      CHECK(actual.syncRho == reference.syncRho);
+      CHECK(actual.frequencyErrorHz == reference.frequencyErrorHz);
+    }
+  }
+}
+
+void benchmarkMatchedScoreReuse()
+{
+  if (!std::getenv("DEMOD_WIFI_SYNC_BENCHMARK"))
+    return;
+  const std::vector<cd> packet = buildBePreamble(50000.0, 20.0e6, 0.001, 23u);
+  std::vector<cd> iq(2097152, cd(0.01, -0.02));
+  for (std::size_t index = 0; index < packet.size(); ++index) {
+    iq[index * 2] = packet[index];
+    iq[index * 2 + 1] = packet[index];
+  }
+  Config config;
+  config.sampleRate = 40.0e6;
+  config.burstSearch = false;
+  wifi11axdemod::Config referenceConfig;
+  referenceConfig.sampleRate = config.sampleRate;
+  referenceConfig.burstSearch = config.burstSearch;
+  referenceConfig.syncThreshold = config.syncThreshold;
+  std::vector<double> referenceTimes, cachedTimes;
+  for (int iteration = 0; iteration < 11; ++iteration) {
+    for (int order = 0; order < 2; ++order) {
+      const bool cached = (iteration + order) % 2 != 0;
+      const auto started = std::chrono::steady_clock::now();
+      if (cached) {
+        const Result result = demodulate(iq, config);
+        CHECK(result.ok && result.syncFound);
+      } else {
+        const wifi11axdemod::Result result = wifi11axdemod::demodulate(iq, referenceConfig);
+        CHECK(result.ok && result.syncFound);
+      }
+      const double elapsed =
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+      if (iteration >= 2)
+        (cached ? cachedTimes : referenceTimes).push_back(elapsed);
+    }
+  }
+  std::sort(referenceTimes.begin(), referenceTimes.end());
+  std::sort(cachedTimes.begin(), cachedTimes.end());
+  std::printf("WIFI_SYNC_BENCHMARK samples=%zu sampleRateHz=40000000 warmups=2 runs=9 referenceMedianMs=%.6f "
+              "cachedMedianMs=%.6f throughputGainPercent=%.3f\n",
+      iq.size(), referenceTimes[4], cachedTimes[4], 100.0 * (referenceTimes[4] / cachedTimes[4] - 1.0));
+}
+
 void testDataEvm()
 {
   const int bitsByMcs[] = {1, 2, 2, 4, 4, 6, 6, 6, 8, 8, 10, 10, 12, 12};
@@ -302,7 +374,9 @@ int main()
   testBurstSyncRecovery();
   testCarrierFrequencyErrorRecovery();
   testNoiseRejection();
+  testMatchedScoreReuse();
   testDataEvm();
+  benchmarkMatchedScoreReuse();
 
   if (gFailures == 0) {
     std::printf("All Wifi11beOfdmCore tests PASSED\n");

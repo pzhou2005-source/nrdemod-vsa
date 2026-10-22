@@ -49,11 +49,11 @@ std::vector<double> windowedPowerDb(const std::vector<std::complex<double> >& iq
   return power;
 }
 
-bool findBurst(const std::vector<std::complex<double> >& iq, double thresholdDb, int& start, int& length)
+bool findBurst(const std::vector<std::complex<double>>& iq, double thresholdDb, int window, int& start, int& length)
 {
   const int n = static_cast<int>(iq.size());
-  if (n == 0) return false;
-  const int window = std::max(4, n / 200);
+  if (n == 0)
+    return false;
   std::vector<double> powerDb = windowedPowerDb(iq, window);
   const double peakDb = *std::max_element(powerDb.begin(), powerDb.end());
   const double threshold = peakDb - std::fabs(thresholdDb);
@@ -63,9 +63,16 @@ bool findBurst(const std::vector<std::complex<double> >& iq, double thresholdDb,
     if (powerDb[i] >= threshold) {
       if (first < 0) first = i;
       last = i;
+    } else if (first >= 0) {
+      break;
     }
   }
   if (first < 0) return false;
+  const double minimumPower = std::pow(10.0, threshold / 10.0);
+  while (first <= last && std::norm(iq[first]) < minimumPower)
+    ++first;
+  while (last >= first && std::norm(iq[last]) < minimumPower)
+    --last;
   start = first;
   length = last - first + 1;
   return length > 0;
@@ -150,13 +157,8 @@ void correlateAccessAddress(const std::vector<int>& bits, uint32_t accessAddress
 }
 
 Config::Config()
-    : sampleRate(0.0),
-      phy(LE_1M),
-      modulationIndex(0.5),
-      burstSearch(true),
-      burstSearchThresholdDb(15.0),
-      accessAddress(DEFAULT_ACCESS_ADDRESS),
-      syncThreshold(0.85)
+    : sampleRate(0.0), phy(LE_1M), modulationIndex(0.5), steadyFrequencyDeviation(false), burstSearch(true),
+      burstSearchThresholdDb(15.0), accessAddress(DEFAULT_ACCESS_ADDRESS), syncThreshold(0.85)
 {
 }
 
@@ -185,9 +187,11 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
     return result;
   }
 
+  const double samplesPerSymbol = config.sampleRate / symbolRateHz(config.phy);
   int burstStart = 0, burstLength = static_cast<int>(iq.size());
   if (config.burstSearch) {
-    if (!findBurst(iq, config.burstSearchThresholdDb, burstStart, burstLength)) {
+    const int powerWindow = std::max(1, static_cast<int>(std::llround(samplesPerSymbol)));
+    if (!findBurst(iq, config.burstSearchThresholdDb, powerWindow, burstStart, burstLength)) {
       result.error = "burst not found";
       return result;
     }
@@ -201,7 +205,6 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
   const std::vector<double> freqHz = instantaneousFrequencyHz(iq, config.sampleRate);
   result.frequencyDeviationHz.assign(freqHz.begin() + burstStart, freqHz.begin() + burstStart + burstLength);
 
-  const double samplesPerSymbol = config.sampleRate / symbolRateHz(config.phy);
   result.samplesPerSymbol = samplesPerSymbol;
 
   // Lock the sample phase against the alternating preamble before any bit decisions.
@@ -239,6 +242,18 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
     if (accessAddressPosition >= 0) {
       result.syncPositionSamples =
           burstStart + bestPhase + static_cast<int>(std::llround(accessAddressPosition * samplesPerSymbol));
+    }
+  }
+
+  const int burstEnd = burstStart + burstLength;
+  if (config.burstSearch && !result.syncWordFound && (config.phy == LE_1M || config.phy == LE_2M) &&
+      static_cast<size_t>(burstEnd) < iq.size()) {
+    const std::vector<std::complex<double>> remaining(iq.begin() + burstEnd, iq.end());
+    Result next = demodulate(remaining, config);
+    if (next.ok && next.syncWordFound) {
+      next.burstStart += burstEnd;
+      next.syncPositionSamples += burstEnd;
+      return next;
     }
   }
 
@@ -297,15 +312,31 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
       ? std::min(burstLength, static_cast<int>(std::llround(EDR_GFSK_HEADER_SYMBOLS * samplesPerSymbol)))
       : burstLength;
   double devSum = 0.0, devMax = -1e300, devMin = 1e300;
+  int deviationSamples = 0;
+  const int symbolSamples = std::max(1, static_cast<int>(std::llround(samplesPerSymbol)));
   for (int i = burstStart; i < burstStart + deltaFLength; ++i) {
-    const double deviation = std::fabs(freqHz[i] - result.frequencyErrorHz);
+    const double signedDeviation = freqHz[i] - result.frequencyErrorHz;
+    if (config.steadyFrequencyDeviation) {
+      if (i < burstStart + symbolSamples || i + symbolSamples >= burstStart + deltaFLength)
+        continue;
+      const double previous = freqHz[i - symbolSamples] - result.frequencyErrorHz;
+      const double next = freqHz[i + symbolSamples] - result.frequencyErrorHz;
+      if (previous * signedDeviation <= 0.0 || next * signedDeviation <= 0.0)
+        continue;
+    }
+    const double deviation = std::fabs(signedDeviation);
     devSum += deviation;
     devMax = std::max(devMax, deviation);
     devMin = std::min(devMin, deviation);
+    ++deviationSamples;
   }
-  result.deltaFAvgHz = deltaFLength > 0 ? devSum / deltaFLength : 0.0;
-  result.deltaFMaxHz = deltaFLength > 0 ? devMax : 0.0;
-  result.deltaFMinHz = deltaFLength > 0 ? devMin : 0.0;
+  if (config.steadyFrequencyDeviation && deviationSamples == 0) {
+    result.error = "No steady GFSK symbol intervals available for frequency deviation.";
+    return result;
+  }
+  result.deltaFAvgHz = deviationSamples > 0 ? devSum / deviationSamples : 0.0;
+  result.deltaFMaxHz = deviationSamples > 0 ? devMax : 0.0;
+  result.deltaFMinHz = deviationSamples > 0 ? devMin : 0.0;
 
   result.ok = true;
   return result;

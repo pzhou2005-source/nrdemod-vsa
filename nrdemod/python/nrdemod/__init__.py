@@ -28,6 +28,8 @@ __all__ = [
     "Config",
     "Result",
     "demodulate",
+    "nbiot_config",
+    "demodulate_nbiot",
     "generate_test_signal",
     "carrier_resource_blocks",
     "version",
@@ -107,21 +109,46 @@ class Config:
     dmrsAdditionalPositions: int = _DEFAULTS.dmrsAdditionalPositions
     dmrsDoubleSymbol: bool = bool(_DEFAULTS.dmrsDoubleSymbol)
     excludedSymbols: Sequence[int] = field(default_factory=list)
+    cpCfoGuardFraction: float = _DEFAULTS.cpCfoGuardFraction
+    removeIqOffsetAfterCfo: bool = bool(_DEFAULTS.removeIqOffsetAfterCfo)
+    ssbSearch: bool = bool(_DEFAULTS.ssbSearch)
+    dmrsEnabled: bool = bool(_DEFAULTS.dmrsEnabled)
+    dmrsConfigurationType2: bool = bool(_DEFAULTS.dmrsConfigurationType2)
+    dmrsScramblingId: int = _DEFAULTS.dmrsScramblingId
+    dmrsNSCID: int = _DEFAULTS.dmrsNSCID
+    dmrsStartSlotNumber: int = _DEFAULTS.dmrsStartSlotNumber
+    dmrsPowerBoostDb: float = _DEFAULTS.dmrsPowerBoostDb
+    decisionRotations: Sequence[complex] = field(default_factory=list)
+    excludedResources: Sequence[bool] = field(default_factory=list)
 
     def _to_c(self):
         raw = NrdConfig()
         lib.nrd_config_default(ctypes.byref(raw))
         for name, _ctype in NrdConfig._fields_:
-            if name in ("abiVersion", "excludedSymbols", "numExcludedSymbols"):
+            if name in ("abiVersion", "excludedSymbols", "numExcludedSymbols",
+                        "decisionRotations", "numDecisionRotations",
+                        "excludedResources", "numExcludedResources"):
                 continue
             value = getattr(self, name)
             setattr(raw, name, int(value) if isinstance(value, bool) else value)
 
-        keep = None
+        keep = []
         if len(self.excludedSymbols):
-            keep = (ctypes.c_int * len(self.excludedSymbols))(*self.excludedSymbols)
-            raw.excludedSymbols = keep
+            symbols = (ctypes.c_int * len(self.excludedSymbols))(*self.excludedSymbols)
+            keep.append(symbols)
+            raw.excludedSymbols = symbols
             raw.numExcludedSymbols = len(self.excludedSymbols)
+        if len(self.decisionRotations):
+            values = np.asarray(self.decisionRotations, dtype=np.complex128).ravel().view(np.float64)
+            rotations = (ctypes.c_double * values.size)(*values)
+            keep.append(rotations)
+            raw.decisionRotations = rotations
+            raw.numDecisionRotations = len(self.decisionRotations)
+        if len(self.excludedResources):
+            resources = (ctypes.c_int * len(self.excludedResources))(*map(int, self.excludedResources))
+            keep.append(resources)
+            raw.excludedResources = resources
+            raw.numExcludedResources = len(self.excludedResources)
         return raw, keep
 
 
@@ -253,6 +280,41 @@ def demodulate(iq, config: Optional[Config] = None, **overrides) -> Result:
     handle = lib.nrd_demodulate(ptr, num_samples, ctypes.byref(raw))
     if not handle:
         raise RuntimeError("nrd_demodulate returned NULL")
+    try:
+        return Result(handle)
+    finally:
+        lib.nrd_result_free(handle)
+
+
+def nbiot_config(sample_rate: float, uplink: bool = False, **overrides) -> Config:
+    """Single-PRB 15 kHz NB-IoT defaults, matching the native platform adapter."""
+    settings = dict(numerology=0, frequencyRange=FR1, channelBandwidthMHz=0,
+                    numResourceBlocks=1, resourceBlockOffset=0, sampleRate=sample_rate,
+                    ssbSearch=False, resample=True, transformPrecoding=uplink,
+                    burstSearch=not uplink, modulation=QPSK if uplink else AUTO,
+                    carrierOffsetHz=7500.0 if uplink else 0.0,
+                    removeIqOffset=True)
+    if uplink:
+        settings.update(syncSearchSymbols=14, cpCfoGuardFraction=1.0 / 3.0,
+                        removeIqOffsetAfterCfo=True, dmrsEnabled=False, dmrsExclude=False)
+    return Config(**{**settings, **overrides})
+
+
+def demodulate_nbiot(iq, sample_rate: float, uplink: bool = False,
+                     downlink_frame: bool = False, **overrides) -> Result:
+    """Demodulate NB-IoT; NPSS frame mode requires maxSymbols=14..140 in steps of 14.
+
+    Uplink supports the 12-subcarrier, 15 kHz DFT-s-OFDM configuration, not
+    arbitrary single-tone or 3.75 kHz NPUSCH allocations.
+    """
+    cfg = nbiot_config(sample_rate, uplink, **overrides)
+    flat = _as_interleaved(iq)
+    num_samples = flat.size // 2
+    raw, keep = cfg._to_c()
+    ptr = flat.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) if num_samples else None
+    handle = lib.nrd_demodulate_nbiot(ptr, num_samples, ctypes.byref(raw), int(uplink), int(downlink_frame))
+    if not handle:
+        raise RuntimeError("nrd_demodulate_nbiot returned NULL")
     try:
         return Result(handle)
     finally:

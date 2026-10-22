@@ -10,7 +10,7 @@ import os
 import sys
 from ctypes import POINTER, c_char_p, c_double, c_float, c_int, c_long, c_size_t, c_uint
 
-ABI_VERSION = 1
+ABI_VERSION = 2
 
 _CANDIDATE_NAMES = {
     "win32": ("nrdemod.dll", "libnrdemod.dll"),
@@ -56,6 +56,19 @@ class NrdConfig(ctypes.Structure):
         ("dmrsDoubleSymbol", c_int),
         ("excludedSymbols", POINTER(c_int)),
         ("numExcludedSymbols", c_int),
+        ("cpCfoGuardFraction", c_double),
+        ("removeIqOffsetAfterCfo", c_int),
+        ("ssbSearch", c_int),
+        ("dmrsEnabled", c_int),
+        ("dmrsConfigurationType2", c_int),
+        ("dmrsScramblingId", c_int),
+        ("dmrsNSCID", c_int),
+        ("dmrsStartSlotNumber", c_int),
+        ("dmrsPowerBoostDb", c_double),
+        ("decisionRotations", POINTER(c_double)),
+        ("numDecisionRotations", c_int),
+        ("excludedResources", POINTER(c_int)),
+        ("numExcludedResources", c_int),
     ]
 
 
@@ -104,6 +117,9 @@ lib.nrd_config_default.restype = c_int
 
 lib.nrd_demodulate.argtypes = [POINTER(c_float), c_size_t, POINTER(NrdConfig)]
 lib.nrd_demodulate.restype = _ResultPtr
+
+lib.nrd_demodulate_nbiot.argtypes = [POINTER(c_float), c_size_t, POINTER(NrdConfig), c_int, c_int]
+lib.nrd_demodulate_nbiot.restype = _ResultPtr
 
 lib.nrd_demodulate64.argtypes = [POINTER(c_double), c_size_t, POINTER(NrdConfig)]
 lib.nrd_demodulate64.restype = _ResultPtr

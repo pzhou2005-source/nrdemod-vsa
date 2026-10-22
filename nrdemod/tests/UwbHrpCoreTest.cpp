@@ -13,10 +13,11 @@
  */
 
 #include "uwb/UwbHrpCore.hpp"
-#include <algorithm>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -104,6 +105,72 @@ void testPeriodicPreambleRecovery()
   CHECK(result.syncFound);
   CHECK(result.syncRho > 0.5);
   CHECK_NEAR(result.preambleSymbolPeriodSamples, codeLength * samplesPerChip, 2.0);
+
+  for (int configuredPeriod : {0, codeLength}) {
+    Config boundedConfig = config;
+    boundedConfig.burstSearch = false;
+    boundedConfig.preamblePeriodChips = configuredPeriod;
+    auto padded = capture;
+    padded.resize(81920);
+    const Result reference = demodulate(padded, boundedConfig);
+    padded.resize(2097152);
+    const Result extended = demodulate(padded, boundedConfig);
+    CHECK(reference.ok && extended.ok);
+    CHECK(reference.syncFound == extended.syncFound);
+    CHECK(reference.syncRho == extended.syncRho);
+    CHECK(reference.preambleSymbolPeriodSamples == extended.preambleSymbolPeriodSamples);
+    CHECK(reference.frequencyErrorHz == extended.frequencyErrorHz);
+  }
+
+  for (double amplitude : {1e-6, 1.0, 1e6}) {
+    auto scaled = capture;
+    for (auto& sample : scaled)
+      sample *= amplitude;
+    const int window = std::max(4, static_cast<int>(scaled.size()) / 200);
+    std::vector<double> originalPower(scaled.size());
+    double sum = 0.0;
+    for (size_t point = 0; point < scaled.size(); ++point) {
+      sum += std::norm(scaled[point]);
+      if (point >= static_cast<size_t>(window))
+        sum -= std::norm(scaled[point - window]);
+      const double mean = sum / std::min(static_cast<int>(point) + 1, window);
+      originalPower[point] = 10.0 * std::log10(mean > 0.0 ? mean : 1e-30);
+    }
+    for (double thresholdDb : {3.0, 10.0, 15.0, 30.0}) {
+      const double threshold = *std::max_element(originalPower.begin(), originalPower.end()) - thresholdDb;
+      int first = -1, last = -1;
+      for (size_t point = 0; point < originalPower.size(); ++point) {
+        if (originalPower[point] >= threshold) {
+          if (first < 0)
+            first = static_cast<int>(point);
+          last = static_cast<int>(point);
+        }
+      }
+      config.burstSearchThresholdDb = thresholdDb;
+      const auto measured = demodulate(scaled, config);
+      CHECK(measured.burstFound);
+      CHECK(measured.burstStart == first);
+      CHECK(measured.burstLength == last - first + 1);
+    }
+  }
+}
+
+void testCarrierCorrectionMatchesDirectRotation()
+{
+  CHECK(correctCarrier({}, 0.31).empty());
+  for (int length : {1, 63, 64, 65, 513, 2057}) {
+    std::vector<std::complex<double>> input(length);
+    for (int point = 0; point < length; ++point)
+      input[point] = {std::sin(point * 0.71) + 0.03, std::cos(point * 0.39) - 0.05};
+    for (double radians : {-0.21, 0.0, 0.31, 1e-5}) {
+      const auto corrected = correctCarrier(input, radians);
+      CHECK(corrected.size() == input.size());
+      for (size_t point = 0; point < input.size(); ++point) {
+        const auto expected = input[point] * std::polar(1.0, radians * point);
+        CHECK_NEAR(std::abs(corrected[point] - expected), 0.0, 2e-12);
+      }
+    }
+  }
 }
 
 void testCarrierFrequencyErrorRecovery()
@@ -246,6 +313,56 @@ void testNoiseOnlyCaptureFailsSync()
   if (result.ok && result.burstFound) {
     CHECK(result.syncRho < 0.5);
   }
+}
+
+void testIncompleteLeadingFrame()
+{
+  const char* path = std::getenv("DEMOD_UWB_SP0_CAPTURE");
+  if (!path)
+    return;
+  std::ifstream stream(path);
+  CHECK(stream.good());
+  std::string line;
+  while (std::getline(stream, line))
+    if (line == "Y" || line == "Y\r")
+      break;
+  std::vector<std::complex<double>> iq;
+  double real, imaginary;
+  while (stream >> real >> imaginary)
+    iq.emplace_back(real, imaginary);
+  Config config;
+  config.sampleRate = 1996.8e6;
+  FrameConfig frame;
+  frame.legacy = false;
+  frame.codeIndex = 9;
+  const auto baseline = demodulateFrame(iq, config, frame);
+  std::printf("UWB leading-frame baseline ok=%d origin=%d error=%s\n", baseline.ok, baseline.syncStart,
+      baseline.error.c_str());
+  CHECK(baseline.ok);
+  if (!baseline.ok)
+    return;
+  const int period = 127 * 4 * frame.samplesPerPulse;
+  const size_t cut = baseline.syncStart + 8 * period;
+  CHECK(cut < iq.size());
+  if (cut >= iq.size())
+    return;
+  std::vector<std::complex<double>> repeated(iq.begin() + cut, iq.end());
+  repeated.resize(repeated.size() + 4 * period);
+  const size_t completeStart = repeated.size();
+  repeated.insert(repeated.end(), iq.begin(), iq.end());
+  const auto recovered = demodulateFrame(repeated, config, frame);
+  std::printf("UWB leading-frame recovered ok=%d origin=%d error=%s\n", recovered.ok, recovered.syncStart,
+      recovered.error.c_str());
+  CHECK(recovered.ok);
+  CHECK(recovered.sfdFound);
+  CHECK(recovered.psduBytes == baseline.psduBytes);
+  CHECK(recovered.syncStart == static_cast<int>(completeStart) + baseline.syncStart);
+  CHECK(std::fabs(recovered.shrEvmRmsPercent - baseline.shrEvmRmsPercent) < 0.1);
+  auto damaged = iq;
+  std::fill(damaged.begin() + baseline.sfdStart, damaged.begin() + baseline.phrStart, std::complex<double>(0, 0));
+  const auto rejected = demodulateFrame(damaged, config, frame);
+  CHECK(!rejected.ok);
+  CHECK(!rejected.sfdFound);
 }
 
 void testCaptureFrame(const std::string& directory, const std::string& stem,
@@ -417,6 +534,7 @@ void testCaptureFrame(const std::string& directory, const std::string& stem,
 int main(int argc, char** argv)
 {
   testPeriodicPreambleRecovery();
+  testCarrierCorrectionMatchesDirectRotation();
   testCarrierFrequencyErrorRecovery();
   testEhprfPreambleRecovery();
   testUnsupportedPhyMode();
@@ -424,6 +542,7 @@ int main(int argc, char** argv)
   testEmptyFrameIsRejected();
   testMacFcsKnownVectors();
   testNoiseOnlyCaptureFailsSync();
+  testIncompleteLeadingFrame();
   if (argc > 1) {
     testCaptureFrame(argv[1], "UWB_4a_ch9_CI3_PRF15M6_6M81_PSDU100", true, 3, false, 0);
     testCaptureFrame(argv[1], "UWB_4z_BPRF_ch5_CI10_SP1_PSDU127", false, 10, true, 1);

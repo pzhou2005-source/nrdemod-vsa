@@ -9,6 +9,7 @@
 #include "wifi11be/Wifi11beOfdmCore.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 
@@ -468,8 +469,15 @@ Result demodulate(const std::vector<cd>& iq, const Config& config)
   const int searchEnd = std::min(static_cast<int>(samples->size()) - 2 * FFT_SIZE, burstStart + burstLength);
   double bestScore = -1.0;
   int bestPos = -1;
+  std::array<double, FFT_SIZE> matchedScores{};
+  for (int offset = 0; offset < FFT_SIZE && burstStart + offset < searchEnd; ++offset) {
+    matchedScores[offset] = matchedFilterScore(*samples, burstStart + offset, ltfTime);
+  }
   for (int pos = burstStart; pos < searchEnd; ++pos) {
-    const double score = matchedFilterScore(*samples, pos, ltfTime) + matchedFilterScore(*samples, pos + FFT_SIZE, ltfTime);
+    const int slot = (pos - burstStart) % FFT_SIZE;
+    const double nextScore = matchedFilterScore(*samples, pos + FFT_SIZE, ltfTime);
+    const double score = matchedScores[slot] + nextScore;
+    matchedScores[slot] = nextScore;
     if (score > bestScore) {
       bestScore = score;
       bestPos = pos;

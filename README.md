@@ -189,3 +189,75 @@ Work down this list; it is almost always one of these:
 
 The `nrdemod/` folder is a copy. After the core changes in the main Linux
 repository, re-run `pack_for_windows.sh` there and re-unzip here.
+
+## GitHub upstream in the Linux workspace
+
+### 2026-10-22 Native Core Integration
+
+The standalone library and bench now share the latest NR, NB-IoT, Bluetooth,
+UWB and WiFi 7 fixes. NR includes the interleaved-input path, guarded CFO and
+post-CFO DC removal, DM-RS power/configuration and reference-resource controls.
+Bluetooth can skip incomplete leading LE packets and optionally measure steady
+frequency deviation. UWB retries SFD after a quiet gap without lowering its
+threshold; WiFi 7 reuses exact LTF scores during synchronization searches.
+
+Both native C libraries use ABI 2; rebuild them together with the Python
+bindings. `native_correlate.py` now uses `nrdemod.demodulate_nbiot` for NB-IoT,
+including uplink transform precoding and slot-aligned pilot exclusion.
+See `nrdemod/README.md` for NPSS frame mode and supported allocation limits.
+
+Validation covers the C++ core regressions, Python API and synthetic NPSS/DC
+tests, plus optional external full-capture NB uplink replay at zero and +/-2 kHz
+CFO. It does not constitute a new Windows VSA run. Hardware-driver compact
+results, async power processing and tester-specific profiling stay outside this
+portable repository; no speculative state-pool optimization is included.
+
+The Linux workspace can track GitHub without replacing its existing directories.
+The directory mapping is:
+
+| Linux workspace | GitHub `pzhou2005-source/nrdemod-vsa` |
+|---|---|
+| `nrdemod_standalone/` | `nrdemod/` |
+| `nrdemod_vsa_bench/` | Repository root |
+
+In the Linux workspace, `nrdemod_vsa_bench/nrdemod` is a symlink to
+`../nrdemod_standalone`. In the GitHub repository, `nrdemod/` contains the
+standalone source files. This is a source mapping, not a submodule.
+
+Run this setup once from the SmarTest repository root in each new workspace:
+
+```bash
+git remote add nrdemod-vsa https://github.com/pzhou2005-source/nrdemod-vsa.git
+git config remote.nrdemod-vsa.fetch '+refs/heads/main:refs/remotes/nrdemod-vsa/main'
+git config remote.nrdemod-vsa.tagOpt --no-tags
+git config remote.nrdemod-vsa.pushurl disabled://nrdemod-vsa
+git fetch nrdemod-vsa
+```
+
+The remote configuration is local to `.git/config`, not versioned. If the remote
+already exists, inspect `git remote -v` rather than running `remote add` again.
+The existing internal `origin` is unchanged. Pushes through `nrdemod-vsa` are
+deliberately disabled to prevent publishing the parent SmarTest repository.
+
+To fetch updates and compare the committed standalone snapshot with GitHub:
+
+```bash
+git fetch nrdemod-vsa
+git log -1 --oneline nrdemod-vsa/main
+git diff --stat HEAD:nrdemod_standalone nrdemod-vsa/main:nrdemod
+git diff HEAD:nrdemod_standalone nrdemod-vsa/main:nrdemod -- include/uwb src/UwbHrpCore.cpp tests/UwbHrpCoreTest.cpp
+```
+
+These comparisons use committed trees; inspect `git status` and `git diff`
+separately for uncommitted work. Fetching updates the remote-tracking reference,
+not the working files. Import reviewed changes deliberately, preserving local
+changes and checking the associated C ABI, Python bindings, build configuration,
+tests and dependencies together. Updating standalone also updates what the local
+VSA symlink exposes, but does not update the integrated platform cores.
+
+Do not run `git pull nrdemod-vsa main` or merge its root into SmarTest: the
+repositories have different roots and histories. Publishing belongs in a
+separate checkout of the public GitHub repository, with only reviewed standalone
+and VSA files copied into their mapped locations; never push SmarTest history.
+Likewise, `sync_from_tree.sh` follows the documented platform-to-standalone
+direction, not GitHub-to-standalone synchronization.

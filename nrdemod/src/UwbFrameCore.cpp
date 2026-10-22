@@ -225,6 +225,7 @@ int correctReedSolomon(std::array<int, 63>& word)
   return std::all_of(checked.begin(), checked.end(), [](int value) { return value == 0; }) ? degree : -1;
 }
 
+#ifdef _WIN32
 std::vector<unsigned char> parseHex(const std::string& text)
 {
   if (text.size() != 32 || text.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos)
@@ -233,6 +234,7 @@ std::vector<unsigned char> parseHex(const std::string& text)
   for (int index = 0; index < 16; ++index) bytes[index] = static_cast<unsigned char>(std::stoul(text.substr(2 * index, 2), nullptr, 16));
   return bytes;
 }
+#endif
 
 std::vector<int> stsBits(const FrameConfig& frame, int bitCount)
 {
@@ -284,6 +286,21 @@ bool validateMacFcs(const std::vector<int>& bytes, int fcsLength)
   for (int index = 0; index < fcsLength; ++index)
     received |= static_cast<uint32_t>(bytes[bytes.size() - fcsLength + index]) << (8 * index);
   return crc == received;
+}
+
+std::vector<std::complex<double>> correctCarrier(const std::vector<std::complex<double>>& iq, double radiansPerSample)
+{
+  std::vector<std::complex<double>> corrected(iq.size());
+  const auto step = std::polar(1.0, radiansPerSample);
+  for (size_t block = 0; block < iq.size(); block += 64) {
+    auto rotation = std::polar(1.0, radiansPerSample * block);
+    const size_t end = std::min(block + 64, iq.size());
+    for (size_t point = block; point < end; ++point) {
+      corrected[point] = iq[point] * rotation;
+      rotation *= step;
+    }
+  }
+  return corrected;
 }
 
 FrameResult demodulateFrame(const std::vector<std::complex<double>>& iq,
@@ -352,29 +369,53 @@ FrameResult demodulateFrame(const std::vector<std::complex<double>>& iq,
     const auto sfdSigns = frame.legacy && frame.legacyRateMbps == 0.11 ? longSfd : sfdTable[frame.sfdIndex];
     const int sfdSymbols = static_cast<int>(sfdSigns.size());
     const int sfdOffset = config.syncLength * period;
-    std::vector<std::complex<double>> corrected(iq.size());
     const double radians = -6.2831853071795864769 * acquired.frequencyErrorHz / config.sampleRate;
-    for (size_t index = 0; index < iq.size(); ++index) corrected[index] = iq[index] * std::polar(1.0, radians * index);
+    std::vector<std::complex<double>> corrected = correctCarrier(iq, radians);
     double best = 0;
     double bestEnergy = 0;
     int origin = -1;
-    for (int candidate = std::max(0, acquired.burstStart - 2 * period);
-         candidate <= acquired.burstStart + period && candidate + sfdOffset + sfdSymbols * period < static_cast<int>(iq.size()); ++candidate) {
-      std::complex<double> dot(0,0);
-      double energy = 0, expectedEnergy = 0;
-      for (int symbol = 0; symbol < sfdSymbols; ++symbol) for (size_t chip = 0; chip < code.size(); ++chip) if (code[chip]) {
-        const auto value = corrected[candidate + sfdOffset + symbol * period + chip * spread * oversample];
-        const int expected = sfdSigns[symbol] * code[chip];
-        dot += value * static_cast<double>(expected);
-        energy += std::norm(value);
-        expectedEnergy += expected * expected;
+    const auto searchSfd = [&](int burstStart) {
+      for (int candidate = std::max(0, burstStart - 2 * period);
+          candidate <= burstStart + period && candidate + sfdOffset + sfdSymbols * period < static_cast<int>(iq.size());
+          ++candidate) {
+        std::complex<double> dot(0, 0);
+        double energy = 0, expectedEnergy = 0;
+        for (int symbol = 0; symbol < sfdSymbols; ++symbol)
+          for (size_t chip = 0; chip < code.size(); ++chip)
+            if (code[chip]) {
+              const auto value = corrected[candidate + sfdOffset + symbol * period + chip * spread * oversample];
+              const int expected = sfdSigns[symbol] * code[chip];
+              dot += value * static_cast<double>(expected);
+              energy += std::norm(value);
+              expectedEnergy += expected * expected;
+            }
+        const double score = energy > 0 ? std::abs(dot) / std::sqrt(energy * expectedEnergy) : 0;
+        const double matchedEnergy = score * score * energy;
+        if (score >= 0.8 && matchedEnergy > bestEnergy) {
+          best = score;
+          bestEnergy = matchedEnergy;
+          origin = candidate;
+        }
       }
-      const double score = energy > 0 ? std::abs(dot) / std::sqrt(energy * expectedEnergy) : 0;
-      const double matchedEnergy = score * score * energy;
-      if (score >= 0.8 && matchedEnergy > bestEnergy) {
-        best = score;
-        bestEnergy = matchedEnergy;
-        origin = candidate;
+    };
+    searchSfd(acquired.burstStart);
+    if (origin < 0 && config.burstSearch) {
+      double peakPower = 0;
+      for (const auto& sample : iq)
+        peakPower = std::max(peakPower, std::norm(sample));
+      const double threshold = peakPower * std::pow(10.0, -std::fabs(config.burstSearchThresholdDb) / 10.0);
+      int quietSamples = 0;
+      for (int sample = acquired.burstStart + period; sample < static_cast<int>(iq.size()); ++sample) {
+        if (std::norm(iq[sample]) < threshold) {
+          ++quietSamples;
+        } else {
+          if (quietSamples >= 2 * period) {
+            searchSfd(sample);
+            if (origin >= 0)
+              break;
+          }
+          quietSamples = 0;
+        }
       }
     }
     result.sfdRho = best;
@@ -388,7 +429,9 @@ FrameResult demodulateFrame(const std::vector<std::complex<double>>& iq,
       }
     gain /= static_cast<double>(gainCount);
     if (std::abs(gain) < 1e-12) throw std::runtime_error("preamble gain estimate failed");
-    for (auto& sample : corrected) sample /= gain;
+    const std::complex<double> inverseGain = 1.0 / gain;
+    for (auto& sample : corrected)
+      sample *= inverseGain;
     result.syncStart = origin;
     result.sfdFound = true;
     result.sfdStart = origin + sfdOffset;
@@ -408,6 +451,8 @@ FrameResult demodulateFrame(const std::vector<std::complex<double>>& iq,
       for (int chip = taps; chip < trainingEnd; ++chip) {
         for (int row = 0; row < taps; ++row) {
           const int value = reference[chip - firstDelay - row];
+          if (value == 0)
+            continue;
           channel[row] += corrected[origin + chip * oversample] * static_cast<double>(value);
           for (int col = 0; col < taps; ++col)
             normal[row][col] += value * reference[chip - firstDelay - col];

@@ -37,7 +37,7 @@ const double TWO_PI = 6.283185307179586476925286766559;
 // characteristics" for LE1M/LE2M), truncated to +/-2 symbol periods.
 std::vector<double> gaussianFilterTaps(double bt, int samplesPerSymbol, int symbolSpan)
 {
-  const double sigma = std::sqrt(std::log(2.0) / 2.0) / (bt * samplesPerSymbol);
+  const double sigma = std::sqrt(2.0 * std::log(2.0)) * samplesPerSymbol / (TWO_PI * bt);
   const int half = symbolSpan * samplesPerSymbol;
   std::vector<double> taps(2 * half + 1);
   double sum = 0.0;
@@ -58,7 +58,7 @@ std::vector<std::complex<double> > modulateGfsk(const std::vector<int>& bits, in
     double targetSampleRate, double frequencyErrorHz, double noiseAmplitude, unsigned seed)
 {
   const double symbolRate = phy == LE_2M ? 2.0e6 : 1.0e6;
-  const int oversample = 16;
+  const int oversample = std::max(16, static_cast<int>(std::ceil(targetSampleRate / symbolRate)));
   const double shapedRate = symbolRate * oversample;
 
   std::vector<double> nrz(bits.size() * oversample);
@@ -160,6 +160,36 @@ void testLe1mAccessAddressRecovery()
   CHECK(result.burstStart < 1500);
 }
 
+void testIncompleteLeadingBurst()
+{
+  for (int phy : {LE_1M, LE_2M}) {
+    std::vector<int> bits;
+    const int preamble = phy == LE_2M ? 16 : 8;
+    for (int symbol = 0; symbol < preamble; ++symbol)
+      bits.push_back(symbol % 2);
+    const auto address = bitsFromUint32LsbFirst(0x71764129u, 32);
+    bits.insert(bits.end(), address.begin(), address.end());
+    bits.insert(bits.end(), 64, 1);
+    Config config;
+    config.phy = phy;
+    config.sampleRate = phy == LE_2M ? 20.0e6 : 10.0e6;
+    const auto packet = modulateGfsk(bits, phy, 0.5, config.sampleRate, 0.0, 0.001, 42u);
+    std::vector<std::complex<double>> capture(100, {0.0, 0.0});
+    capture.insert(capture.end(), packet.begin() + (preamble + 42) * 10, packet.end());
+    capture.resize(capture.size() + 200, {0.0, 0.0});
+    const int completeStart = static_cast<int>(capture.size());
+    capture.insert(capture.end(), packet.begin(), packet.end());
+    capture.resize(capture.size() + 100, {0.0, 0.0});
+    const Result result = demodulate(capture, config);
+    CHECK(result.ok);
+    CHECK(result.syncWordFound);
+    CHECK(result.syncWordRho > 0.9);
+    CHECK(result.burstStart == completeStart);
+    CHECK(result.syncPositionSamples >= completeStart);
+    CHECK(result.accessAddressBits == address);
+  }
+}
+
 void testLe2mAccessAddressRecovery()
 {
   const uint32_t accessAddress = 0x8e89bed6u; // Bluetooth Core Spec advertising channel AA
@@ -241,6 +271,79 @@ void testBdrBurstAndFrequencyMetrics()
   CHECK(result.deltaFAvgHz > 0.0);
 }
 
+void testSteadySymbolFrequencyDeviation()
+{
+  std::vector<int> bits;
+  for (int index = 0; index < 8; ++index)
+    bits.push_back(index % 2);
+  const std::vector<int> address = bitsFromUint32LsbFirst(0x71764129u, 32);
+  bits.insert(bits.end(), address.begin(), address.end());
+  for (int index = 0; index < 1024; ++index)
+    bits.push_back((index / 4) % 2);
+
+  Config config;
+  config.sampleRate = 32e6;
+  config.burstSearch = false;
+  config.steadyFrequencyDeviation = true;
+  const std::vector<std::complex<double>> packet = modulateGfsk(bits, LE_1M, 0.5, config.sampleRate, 0.0, 0.0, 19u);
+  const Result result = demodulate(packet, config);
+  CHECK(result.ok);
+  CHECK(result.syncWordFound);
+  CHECK_NEAR(result.deltaFAvgHz, 250000.0, 12500.0);
+}
+
+void testRepeatedPacketsExcludeIdleNoise()
+{
+  std::vector<int> bits;
+  for (int index = 0; index < 8; ++index)
+    bits.push_back(index % 2);
+  const std::vector<int> address = bitsFromUint32LsbFirst(0x71764129u, 32);
+  bits.insert(bits.end(), address.begin(), address.end());
+  for (int index = 0; index < 256; ++index)
+    bits.push_back((index / 4) % 2);
+
+  Config config;
+  config.sampleRate = 32e6;
+  const std::vector<std::complex<double>> packet = modulateGfsk(bits, LE_1M, 0.5, config.sampleRate, 0.0, 0.0, 17u);
+  config.burstSearch = false;
+  const Result reference = demodulate(packet, config);
+  CHECK(reference.ok);
+
+  const int firstPacketStart = 4096;
+  const int secondPacketStart = firstPacketStart + static_cast<int>(packet.size()) + 20000;
+  std::vector<std::complex<double>> capture(secondPacketStart + packet.size() + 4096);
+  unsigned noiseState = 31u;
+  for (auto& sample : capture) {
+    noiseState = noiseState * 1664525u + 1013904223u;
+    const double real = (static_cast<double>(noiseState >> 8) / 16777216.0 - 0.5) * 0.001;
+    noiseState = noiseState * 1664525u + 1013904223u;
+    const double imaginary = (static_cast<double>(noiseState >> 8) / 16777216.0 - 0.5) * 0.001;
+    sample = std::complex<double>(real, imaginary);
+  }
+  std::copy(packet.begin(), packet.end(), capture.begin() + firstPacketStart);
+  std::copy(packet.begin(), packet.end(), capture.begin() + secondPacketStart);
+
+  config.burstSearch = true;
+  const Result result = demodulate(capture, config);
+  CHECK(result.ok);
+  CHECK(result.syncWordFound);
+  CHECK(result.burstStart + result.burstLength < secondPacketStart);
+  CHECK_NEAR(result.deltaFAvgHz, reference.deltaFAvgHz, 5000.0);
+  CHECK_NEAR(result.frequencyErrorHz, reference.frequencyErrorHz, 1000.0);
+
+  config.steadyFrequencyDeviation = true;
+  const Result completePacket = demodulate(packet, config);
+  CHECK(completePacket.ok && completePacket.syncWordFound);
+  const size_t cut = firstPacketStart + packet.size() / 2;
+  const std::vector<std::complex<double>> partialCapture(capture.begin() + cut, capture.end());
+  const Result partial = demodulate(partialCapture, config);
+  CHECK(partial.ok);
+  CHECK(partial.syncWordFound);
+  CHECK(partial.burstStart >= static_cast<int>(packet.size() / 2) + 19000);
+  CHECK_NEAR(partial.deltaFAvgHz, completePacket.deltaFAvgHz, 5000.0);
+  CHECK_NEAR(partial.frequencyErrorHz, completePacket.frequencyErrorHz, 1000.0);
+}
+
 void testNoBurstWhenCaptureIsEmpty()
 {
   Config config;
@@ -279,9 +382,12 @@ void testWrongAccessAddressFailsSync()
 
 int main()
 {
+  testIncompleteLeadingBurst();
   testLe1mAccessAddressRecovery();
   testLe2mAccessAddressRecovery();
   testBdrBurstAndFrequencyMetrics();
+  testSteadySymbolFrequencyDeviation();
+  testRepeatedPacketsExcludeIdleNoise();
   testNoBurstWhenCaptureIsEmpty();
   testWrongAccessAddressFailsSync();
 

@@ -48,6 +48,7 @@ namespace btdemod {
     double sampleRate;             // Hz, input IQ sample rate
     int phy;                       // Phy enum, selects the symbol rate (and sync scope for BDR_GFSK)
     double modulationIndex;        // nominal h: 0.5 for Bluetooth LE, ~0.3 for classic BDR
+    bool steadyFrequencyDeviation;
     bool burstSearch;              // search for the burst in the capture
     double burstSearchThresholdDb; // power threshold below the peak, dB
     // Access Address correlated against to declare "sync word found". Bluetooth Core Spec

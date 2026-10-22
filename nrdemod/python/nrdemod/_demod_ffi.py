@@ -11,7 +11,7 @@ import os
 import sys
 from ctypes import POINTER, c_char_p, c_double, c_float, c_int, c_long, c_size_t, c_uint32
 
-ABI_VERSION = 1
+ABI_VERSION = 2
 
 _CANDIDATE_NAMES = {
     "win32": ("demod.dll", "libdemod.dll"),
@@ -34,6 +34,7 @@ class DemodConfig(ctypes.Structure):
         ("phyMode", c_int),
         ("syncLength", c_int),
         ("chipRateHz", c_double),
+        ("steadyFrequencyDeviation", c_int),
     ]
 
 

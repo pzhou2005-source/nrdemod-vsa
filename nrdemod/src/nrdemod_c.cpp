@@ -10,6 +10,7 @@
 
 #include "nrdemod/nrdemod_c.h"
 #include "nr/NrOfdmCore.hpp"
+#include "nbiot/NbIotCore.hpp"
 
 #include <cstring>
 #include <exception>
@@ -151,6 +152,23 @@ int toCore(const NrdConfig* in, nrdemod::Config& cfg)
   cfg.dmrs.typeAPosition       = in->dmrsTypeAPosition;
   cfg.dmrs.additionalPositions = in->dmrsAdditionalPositions;
   cfg.dmrs.doubleSymbol        = in->dmrsDoubleSymbol != 0;
+  cfg.cpCfoGuardFraction = in->cpCfoGuardFraction;
+  cfg.removeIqOffsetAfterCfo = in->removeIqOffsetAfterCfo != 0;
+  cfg.ssbSearch = in->ssbSearch != 0;
+  cfg.dmrs.enabled = in->dmrsEnabled != 0;
+  cfg.dmrs.configurationType2 = in->dmrsConfigurationType2 != 0;
+  cfg.dmrs.scramblingId = in->dmrsScramblingId;
+  cfg.dmrs.nSCID = in->dmrsNSCID;
+  cfg.dmrs.startSlotNumber = in->dmrsStartSlotNumber;
+  cfg.dmrs.powerBoostDb = in->dmrsPowerBoostDb;
+  if (in->numDecisionRotations < 0 || in->numExcludedResources < 0 ||
+      (in->numDecisionRotations && !in->decisionRotations) ||
+      (in->numExcludedResources && !in->excludedResources)) return NRD_ERR_SIZE;
+  for (int index = 0; index < in->numDecisionRotations; ++index)
+    cfg.decisionRotations.push_back(std::complex<double>(
+        in->decisionRotations[2 * index], in->decisionRotations[2 * index + 1]));
+  for (int index = 0; index < in->numExcludedResources; ++index)
+    cfg.excludedResources.push_back(in->excludedResources[index] != 0);
 
   cfg.excludedSymbols.clear();
   if (in->excludedSymbols != 0 && in->numExcludedSymbols > 0) {
@@ -160,7 +178,8 @@ int toCore(const NrdConfig* in, nrdemod::Config& cfg)
   return NRD_OK;
 }
 
-NrdResult* run(const std::complex<float>* iq, size_t numSamples, const NrdConfig* in)
+NrdResult* run(const float* iq, size_t numSamples, const NrdConfig* in,
+  bool nbiot = false, bool uplink = false, bool downlinkFrame = false)
 {
   NrdResult* out = new (std::nothrow) NrdResult();
   if (out == 0) return 0;
@@ -170,12 +189,13 @@ NrdResult* run(const std::complex<float>* iq, size_t numSamples, const NrdConfig
   if (rc != NRD_OK) {
     out->core.ok = false;
     out->core.error = (rc == NRD_ERR_ABI) ? "NrdConfig ABI version mismatch"
-                                          : "null configuration";
+                                          : "invalid or null configuration";
     return out;
   }
 
   try {
-    out->core = nrdemod::demodulate(iq, numSamples, cfg);
+    out->core = nbiot ? nbiotdemod::demodulate(iq, numSamples, cfg, uplink, downlinkFrame)
+             : nrdemod::demodulateInterleaved(iq, numSamples, cfg);
   } catch (const std::exception& e) {
     out->core = nrdemod::Result();
     out->core.ok = false;
@@ -272,24 +292,38 @@ int NRDEMOD_CALL nrd_config_default(NrdConfig* out)
   out->dmrsTypeAPosition             = cfg.dmrs.typeAPosition;
   out->dmrsAdditionalPositions       = cfg.dmrs.additionalPositions;
   out->dmrsDoubleSymbol              = cfg.dmrs.doubleSymbol ? 1 : 0;
+  out->cpCfoGuardFraction = cfg.cpCfoGuardFraction;
+  out->removeIqOffsetAfterCfo = cfg.removeIqOffsetAfterCfo ? 1 : 0;
+  out->ssbSearch = cfg.ssbSearch ? 1 : 0;
+  out->dmrsEnabled = cfg.dmrs.enabled ? 1 : 0;
+  out->dmrsConfigurationType2 = cfg.dmrs.configurationType2 ? 1 : 0;
+  out->dmrsScramblingId = cfg.dmrs.scramblingId;
+  out->dmrsNSCID = cfg.dmrs.nSCID;
+  out->dmrsStartSlotNumber = cfg.dmrs.startSlotNumber;
+  out->dmrsPowerBoostDb = cfg.dmrs.powerBoostDb;
   return NRD_OK;
 }
 
 NrdResult* NRDEMOD_CALL nrd_demodulate(const float* iq, size_t numSamples, const NrdConfig* cfg)
 {
   if (iq == 0 && numSamples != 0) return 0;
-  return run(reinterpret_cast<const std::complex<float>*>(iq), numSamples, cfg);
+  return run(iq, numSamples, cfg);
 }
 
 NrdResult* NRDEMOD_CALL nrd_demodulate64(const double* iq, size_t numSamples, const NrdConfig* cfg)
 {
   if (iq == 0 && numSamples != 0) return 0;
-  std::vector<std::complex<float> > buf(numSamples);
-  for (size_t i = 0; i < numSamples; ++i) {
-    buf[i] = std::complex<float>(static_cast<float>(iq[2 * i]),
-                                 static_cast<float>(iq[2 * i + 1]));
-  }
+  std::vector<float> buf(2 * numSamples);
+  for (size_t index = 0; index < buf.size(); ++index)
+    buf[index] = static_cast<float>(iq[index]);
   return run(buf.empty() ? 0 : &buf[0], numSamples, cfg);
+}
+
+NrdResult* NRDEMOD_CALL nrd_demodulate_nbiot(const float* iq, size_t numSamples,
+    const NrdConfig* cfg, int uplink, int downlinkFrame)
+{
+  if (iq == 0 && numSamples != 0) return 0;
+  return run(iq, numSamples, cfg, true, uplink != 0, downlinkFrame != 0);
 }
 
 void NRDEMOD_CALL nrd_result_free(NrdResult* r)

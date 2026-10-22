@@ -153,6 +153,8 @@ struct FrameResult {
   std::vector<int> psduBytes;
 };
 
+std::vector<std::complex<double>> correctCarrier(const std::vector<std::complex<double>>& iq, double radiansPerSample);
+
 FrameResult demodulateFrame(const std::vector<std::complex<double> >& iq,
     const Config& config, const FrameConfig& frameConfig);
 

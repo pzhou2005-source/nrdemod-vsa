@@ -36,4 +36,6 @@ for relPath in "${!families[@]}"; do
   cp -v "$tree/test/${name}Test.cpp" "$here/tests/${name}Test.cpp"
 done
 
+cp -v "$tree/src/uwb/UwbFrameCore.cpp" "$here/src/UwbFrameCore.cpp"
+
 echo "done - rebuild with: cmake -S '$here' -B '$here/build' && cmake --build '$here/build' -j"

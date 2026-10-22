@@ -39,7 +39,7 @@
 extern "C" {
 #endif
 
-#define DEMOD_ABI_VERSION 1
+#define DEMOD_ABI_VERSION 2
 
 /** Selects which native core demod_demodulate() dispatches to. */
 enum DemodFamily {
@@ -99,6 +99,7 @@ typedef struct DemodConfig {
   int      phyMode;
   int      syncLength;
   double   chipRateHz;
+  int      steadyFrequencyDeviation;
 } DemodConfig;
 
 /** Opaque demodulation result, tagged internally with the DemodFamily it came from. */

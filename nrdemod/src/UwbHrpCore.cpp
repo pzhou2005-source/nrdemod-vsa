@@ -17,17 +17,17 @@ namespace {
 
 const double TWO_PI = 6.283185307179586476925286766559;
 
-std::vector<double> windowedPowerDb(const std::vector<std::complex<double> >& iq, int window)
+std::vector<double> windowedPower(const std::vector<std::complex<double>>& iq, int window)
 {
   const int n = static_cast<int>(iq.size());
   std::vector<double> power(n, 0.0);
+  const double inverseWindow = 1.0 / window;
   double sum = 0.0;
   for (int i = 0; i < n; ++i) {
     sum += std::norm(iq[i]);
     if (i >= window) sum -= std::norm(iq[i - window]);
-    const int count = std::min(i + 1, window);
-    const double mean = count > 0 ? sum / count : 0.0;
-    power[i] = 10.0 * std::log10(mean > 0.0 ? mean : 1e-30);
+    const double mean = i + 1 < window ? sum / (i + 1) : sum * inverseWindow;
+    power[i] = mean > 0.0 ? mean : 1e-30;
   }
   return power;
 }
@@ -37,13 +37,13 @@ bool findBurst(const std::vector<std::complex<double> >& iq, double thresholdDb,
   const int n = static_cast<int>(iq.size());
   if (n == 0) return false;
   const int window = std::max(4, n / 200);
-  std::vector<double> powerDb = windowedPowerDb(iq, window);
-  const double peakDb = *std::max_element(powerDb.begin(), powerDb.end());
-  const double threshold = peakDb - std::fabs(thresholdDb);
+  std::vector<double> power = windowedPower(iq, window);
+  const double peakPower = *std::max_element(power.begin(), power.end());
+  const double threshold = peakPower * std::pow(10.0, -std::fabs(thresholdDb) / 10.0);
 
   int first = -1, last = -1;
   for (int i = 0; i < n; ++i) {
-    if (powerDb[i] >= threshold) {
+    if (power[i] >= threshold) {
       if (first < 0) first = i;
       last = i;
     }
@@ -171,11 +171,16 @@ Result demodulate(const std::vector<std::complex<double> >& iq, const Config& co
   // Precompute |iq|^2 and a running sum-of-squares (energy prefix sum) ONCE, not per-lag - see
   // periodicEnergyCorrelation()'s comment for why this is the dominant cost of this function.
   const int n = static_cast<int>(iq.size());
-  std::vector<double> power(n);
-  for (int i = 0; i < n; ++i) power[i] = std::norm(iq[i]);
-  std::vector<double> prefixPower(n + 1, 0.0);
-  std::vector<double> prefixPowerSq(n + 1, 0.0);
-  for (int i = 0; i < n; ++i) {
+  const auto maximumWindow =
+      std::min<long long>(burstLength, std::llround(config.syncLength * static_cast<double>(maxLagSamples)));
+  const int correlationSamples =
+      static_cast<int>(std::min<long long>(n, std::max<long long>(0, burstStart + maximumWindow + maxLagSamples)));
+  std::vector<double> power(correlationSamples);
+  for (int i = 0; i < correlationSamples; ++i)
+    power[i] = std::norm(iq[i]);
+  std::vector<double> prefixPower(correlationSamples + 1, 0.0);
+  std::vector<double> prefixPowerSq(correlationSamples + 1, 0.0);
+  for (int i = 0; i < correlationSamples; ++i) {
     prefixPower[i + 1] = prefixPower[i] + power[i];
     prefixPowerSq[i + 1] = prefixPowerSq[i] + power[i] * power[i];
   }

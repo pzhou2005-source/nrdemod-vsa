@@ -104,6 +104,7 @@ class Config:
     phyMode: int = UWB_BPRF
     syncLength: int = 64
     chipRateHz: float = 499.2e6
+    steadyFrequencyDeviation: bool = False
 
     def _to_c(self, family: int) -> DemodConfig:
         raw = DemodConfig()
@@ -118,6 +119,7 @@ class Config:
         raw.phyMode = self.phyMode
         raw.syncLength = self.syncLength
         raw.chipRateHz = self.chipRateHz
+        raw.steadyFrequencyDeviation = int(self.steadyFrequencyDeviation)
         return raw
 
 

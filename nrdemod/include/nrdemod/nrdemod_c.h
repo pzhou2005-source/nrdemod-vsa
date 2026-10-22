@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /** ABI revision, bumped whenever NrdConfig changes layout. */
-#define NRDEMOD_ABI_VERSION 1
+#define NRDEMOD_ABI_VERSION 2
 
 enum NrdModulation {
   NRD_MOD_AUTO   = 0,
@@ -99,6 +99,19 @@ typedef struct NrdConfig {
 
   const int* excludedSymbols;           /* may be NULL */
   int        numExcludedSymbols;
+  double cpCfoGuardFraction;
+  int removeIqOffsetAfterCfo;
+  int ssbSearch;
+  int dmrsEnabled;
+  int dmrsConfigurationType2;
+  int dmrsScramblingId;
+  int dmrsNSCID;
+  int dmrsStartSlotNumber;
+  double dmrsPowerBoostDb;
+  const double* decisionRotations;
+  int numDecisionRotations;
+  const int* excludedResources;
+  int numExcludedResources;
 } NrdConfig;
 
 /** Opaque demodulation result. */
@@ -121,6 +134,9 @@ NRDEMOD_API NrdResult* NRDEMOD_CALL nrd_demodulate(const float* iq, size_t numSa
 /** Same, but from interleaved float64 pairs (converted internally). */
 NRDEMOD_API NrdResult* NRDEMOD_CALL nrd_demodulate64(const double* iq, size_t numSamples,
                                                      const NrdConfig* cfg);
+
+NRDEMOD_API NrdResult* NRDEMOD_CALL nrd_demodulate_nbiot(const float* iq, size_t numSamples,
+  const NrdConfig* cfg, int uplink, int downlinkFrame);
 
 NRDEMOD_API void NRDEMOD_CALL nrd_result_free(NrdResult* r);
 

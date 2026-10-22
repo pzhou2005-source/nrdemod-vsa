@@ -98,15 +98,7 @@ def correlate_one(family, stem, wav, vsa) -> dict:
     row["status"] = "ok"
 
     if family in NBIOT_FAMILIES:
-        # 1 resource block, 15 kHz SCS (numerology 0), single-tone NPUSCH/NPDSCH is always QPSK -
-        # see nrdemod/README.md "NB-IoT downlink/uplink" and nrdemod/examples/selftest.py.
-        # carrierOffsetHz=7500: NB-IoT standalone sits on a half-subcarrier-shifted raster
-        # relative to the LTE grid these TDC captures were generated against; without it the
-        # core's own CFO estimate settles on -7500 Hz and EVM is unusably high.
-        cfg = nrdemod.Config(numerology=0, frequencyRange=nrdemod.FR1, channelBandwidthMHz=0,
-                              numResourceBlocks=1, resourceBlockOffset=0, transformPrecoding=False,
-                              resample=True, sampleRate=fs, modulation=nrdemod.QPSK, carrierOffsetHz=7500.0)
-        res = nrdemod.demodulate(iq, cfg)
+        res = nrdemod.demodulate_nbiot(iq, fs, uplink=family == "NbIotUl")
         if not res.ok:
             row.update(status="error", note=res.error)
             row["pass"] = None
@@ -114,13 +106,6 @@ def correlate_one(family, stem, wav, vsa) -> dict:
         row.update(native_info=f"mod={res.modulation_name} symbols={res.numSymbols}",
                    native_FreqErr=res.frequencyErrorHz)
         _evm_compare(row, res.rmsEvmPercent, vsa_evm, True)
-        if row.get("pass") is False and res.rmsEvmPercent > 10:
-            # EVM stays >>1% even after the raster-offset fix on these real captures (the
-            # core's own selftest, a synthetic signal round-tripped through itself, reads ~0%);
-            # likely an NPDSCH/NPUSCH resource-element mapping (NRS position, tone index)
-            # the generic 1-RB PDSCH/PUSCH config doesn't fully replicate. Flagged, not silently
-            # passed - see the native_dev_hz=... fields for the raw numbers.
-            row["note"] = "EVM >>1%% even with CFO fixed; likely NPDSCH/NPUSCH RE-mapping mismatch, needs DSP review"
         return row
 
     fid = FAMILY_ID[family]

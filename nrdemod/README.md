@@ -15,13 +15,9 @@ Two independent shared libraries are built:
   LTE/eMTC downlink+uplink reuse this same CP-OFDM/SC-FDMA core with an
   explicit `numResourceBlocks` (see the in-tree `lte/LteDemodulation.cpp` for
   the exact config this maps to); there is no separate standalone LTE module
-  since the core itself already covers it. NB-IoT downlink+uplink reuse it the
-  same way — 15 kHz SCS, numerology 0, a single resource block
-  (`numResourceBlocks=1`, `resourceBlockOffset=0`) and no transform precoding
-  for the single-tone captures this core supports (see the in-tree
-  `nbiot/NbIotDemodulation.cpp` for the exact config, including
-  `ssbSearch=False`, a no-op here); again no separate standalone NB-IoT module
-  exists or is needed.
+  since the core itself already covers it. NB-IoT has dedicated
+  `nbiot_config` / `demodulate_nbiot` entry points around that core, including
+  uplink DFT-s-OFDM pilot exclusion and downlink NPSS frame synchronization.
 - `demod` — WiFi (802.11a/b/n/ac/ax/ad/be), Bluetooth (LE1M/LE2M GFSK with full
   sync-word decode; classic BDR, classic EDR's leading GFSK access-code+header,
   and LE Coded S=8 - all three burst/frequency-metrics only) and UWB
@@ -114,28 +110,40 @@ attributes, vectors as numpy arrays (`constellation`, `reference`,
 `channelImpulseResponseDb`, ...). `res.as_dict(include_vectors=True)` dumps
 them all.
 
-NB-IoT downlink/uplink (single-tone NPUSCH) use the same `nrdemod` module and
-core, just with the config the in-tree `nbiot/NbIotDemodulation.cpp` adapter
-builds — 15 kHz SCS (numerology 0) and a single resource block. The in-tree
-adapter also sets `ssbSearch=False` (NB-IoT has no 5GNR-style PSS/SSB), but
-that field isn't exposed through this standalone C ABI; it is a no-op anyway
-for a 1-RB/12-subcarrier grid since the SSB correlation only ever runs when
-`numSc >= 240`:
+NB-IoT uses numerology 0, 15 kHz SCS and one resource block (12 subcarriers).
+Use the platform-equivalent defaults rather than a generic NR configuration:
 
 ```python
-nbiot_cfg = nrdemod.Config(
-    numerology=0,
-    frequencyRange=nrdemod.FR1,
-    channelBandwidthMHz=0,              # unknown/not applicable for NB-IoT
-    numResourceBlocks=1,
-    resourceBlockOffset=0,
-    transformPrecoding=False,           # single-tone NPUSCH only; multi-tone
-                                         # DFT-s-OFDM would need True, like NR PUSCH
-    resample=True,
-    sampleRate=1.92e6,
-)
-res = nrdemod.demodulate(iq, nbiot_cfg)
+res = nrdemod.demodulate_nbiot(iq, 1.92e6, uplink=True)
+downlink = nrdemod.demodulate_nbiot(iq_dl, fs)
+frame = nrdemod.demodulate_nbiot(iq_frame, fs, downlink_frame=True, maxSymbols=28)
 ```
+
+Uplink defaults enable transform precoding, a 7500 Hz known carrier offset,
+continuous input, 14-symbol timing search, guarded CP CFO estimation and
+DC removal after CFO correction. Two passes align and exclude NPUSCH pilot
+symbol 3 of each 7-symbol slot. This supports the verified 12-subcarrier
+captures, not arbitrary single-tone or 3.75 kHz allocations. Downlink frame
+mode needs 14..140 symbols in complete 14-symbol subframes, searches a bounded
+input prefix for NPSS, and excludes/rotates reference resources for EVM.
+
+Both C libraries and Python bindings now use **ABI 2**. Rebuild both shared
+libraries together; old bindings/libraries are rejected, not layout-compatible.
+NR settings now expose `cpCfoGuardFraction`, `removeIqOffsetAfterCfo`,
+`ssbSearch`, DM-RS settings, `decisionRotations` and `excludedResources`.
+In C, rotations are interleaved double real/imaginary pairs and resource masks
+are int booleans; counts are complex-value and resource counts respectively.
+
+CTest includes `NrApiTest` when Python and NumPy are available. To also replay
+all 14 external full uplink captures at zero and +/-2 kHz CFO:
+
+```bash
+PYTHONPATH=python NRDEMOD_NBIOT_UL_CAPTURE_DIR=/path/to/NbIotUl python tests/NrApiTest.py -v
+```
+
+The test data are not bundled. These are offline regressions, not a fresh
+Windows VSA or RF acceptance run. `tools/native_correlate.py` in the VSA bench
+uses the same NB API and retains its existing VSA comparison gates.
 
 ### WiFi / Bluetooth LE / UWB
 
@@ -183,7 +191,10 @@ they are not the waveform sidecar/VSA mode numbers. C callers use
 EHPRF uses the periodic preamble receiver at the configured chip/sample rates.
 That synchronization-only entry point does not decode frame fields. Use the
 frame API below for dynamic PHR, BCC/LDPC, keyed STS and PSDU decoding.
-ABI version 1 and the existing common configuration layout are unchanged.
+The common configuration uses ABI 2 and adds the optional Bluetooth
+`steadyFrequencyDeviation` switch (default false). Bluetooth synchronization
+can skip an incomplete leading LE packet; UWB frame decoding retries SFD after
+a sufficiently long quiet gap without relaxing either correlation threshold.
 
 ### Native UWB Frame Decoding
 

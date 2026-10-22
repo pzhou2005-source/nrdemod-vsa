@@ -16,6 +16,7 @@ endif()
 # Python loads this by file name, so keep it stable on every platform.
 add_library(nrdemod SHARED
   src/NrOfdmCore.cpp
+  src/NbIotCore.cpp
   src/nrdemod_c.cpp
 )
 
@@ -152,6 +153,16 @@ if(NRDEMOD_BUILD_TESTS)
     endif()
     add_test(NAME ${testName} COMMAND ${testName})
   endforeach()
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import numpy"
+      RESULT_VARIABLE NRDEMOD_NUMPY_STATUS OUTPUT_QUIET ERROR_QUIET)
+    if(NRDEMOD_NUMPY_STATUS EQUAL 0)
+      add_test(NAME NrApiTest COMMAND "${CMAKE_COMMAND}" -E env
+        "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python"
+        "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/NrApiTest.py" -v)
+    endif()
+  endif()
   if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../captures/generated/uwb/UWB_4a_ch9_CI3_PRF15M6_6M81_PSDU100.txt")
     add_test(NAME UwbFrameCaptureTest COMMAND UwbHrpCoreTest
       "${CMAKE_CURRENT_SOURCE_DIR}/../captures/generated/uwb")
